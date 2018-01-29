@@ -406,7 +406,9 @@ static int collectargs(char **argv, int *flags)
       break;
     case 'e':
       *flags |= FLAGS_EXEC;
+      /* fallthrough */
     case 'a':  /* RaptorJIT extension */
+      /* fallthrough */
     case 'j':  /* LuaJIT extension */
     case 'l':
     case 'p':  /* RaptorJIT extension */

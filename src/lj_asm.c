@@ -1864,9 +1864,8 @@ static void asm_setup_regsp(ASMState *as)
     case IR_SNEW: case IR_XSNEW: case IR_NEWREF: case IR_BUFPUT:
       if (REGARG_NUMGPR < 3 && as->evenspill < 3)
 	as->evenspill = 3;  /* lj_str_new and lj_tab_newkey need 3 args. */
-    case IR_CNEW:
-    case IR_TNEW: case IR_TDUP: case IR_CNEWI: case IR_TOSTR:
-    case IR_BUFSTR:
+      /* fallthrough */
+    case IR_TNEW: case IR_TDUP: case IR_CNEW: case IR_CNEWI: case IR_TOSTR:
       ir->prev = REGSP_HINT(RID_RET);
       if (inloop)
 	as->modset = RSET_SCRATCH;
@@ -1883,7 +1882,7 @@ static void asm_setup_regsp(ASMState *as)
 	ir->prev = REGSP_HINT(RID_FPRET);
 	continue;
       }
-      /* fallthrough for integer POW */
+      /* fallthrough */ /* for integer POW */
     case IR_DIV: case IR_MOD:
       if (!irt_isnum(ir->t)) {
 	ir->prev = REGSP_HINT(RID_RET);
