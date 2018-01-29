@@ -10,6 +10,7 @@
 
 
 LJ_FUNC int lj_carith_op(lua_State *L, MMS mm);
+LJ_FUNC int lj_carith_len(lua_State *L);
 
 LJ_FUNC uint64_t lj_carith_shift64(uint64_t x, int32_t sh, int op);
 LJ_FUNC uint64_t lj_carith_check64(lua_State *L, int narg, CTypeID *id);

@@ -296,6 +296,15 @@ uint64_t lj_carith_shift64(uint64_t x, int32_t sh, int op)
   return x;
 }
 
+/* No built-in functionality for length of cdata. */
+int lj_carith_len(lua_State *L)
+{
+  CTState *cts = ctype_cts(L);
+  CDArith ca;
+  carith_checkarg(L, cts, &ca);
+  return lj_carith_meta(L, cts, &ca, MM_len);
+}
+
 /* Equivalent to lj_lib_checkbit(), but handles cdata. */
 uint64_t lj_carith_check64(lua_State *L, int narg, CTypeID *id)
 {
