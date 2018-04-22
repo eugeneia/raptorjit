@@ -272,15 +272,22 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
   } else {
     const char *p = strdata(lj_lib_checkstr(L, 1));
     char *ep;
+    unsigned int neg = 0;
     unsigned long ul;
     if (base < 2 || base > 36)
       lj_err_arg(L, 2, LJ_ERR_BASERNG);
-    ul = strtoul(p, &ep, base);
-    if (p != ep) {
-      while (lj_char_isspace((unsigned char)(*ep))) ep++;
-      if (*ep == '\0') {
-        setnumV(L->base-1-LJ_FR2, (lua_Number)ul);
-	return FFH_RES(1);
+    while (lj_char_isspace((unsigned char)(*p))) p++;
+    if (*p == '-') { p++; neg = 1; } else if (*p == '+') { p++; }
+    if (lj_char_isalnum((unsigned char)(*p))) {
+      ul = strtoul(p, &ep, base);
+      if (p != ep) {
+	while (lj_char_isspace((unsigned char)(*ep))) ep++;
+	if (*ep == '\0') {
+	  lua_Number n = (lua_Number)ul;
+	  if (neg) n = -n;
+	  setnumV(L->base-1-LJ_FR2, n);
+	  return FFH_RES(1);
+	}
       }
     }
   }
