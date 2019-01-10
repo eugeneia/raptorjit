@@ -115,7 +115,7 @@ typedef uint8_t MCode;
 
 /* Stack snapshot header. */
 typedef struct SnapShot {
-  uint16_t mapofs;	/* Offset into snapshot map. */
+  uint32_t mapofs;	/* Offset into snapshot map. */
   IRRef1 ref;		/* First IR ref for this snapshot. */
   uint8_t nslots;	/* Number of valid slots. */
   uint8_t topslot;	/* Maximum frame extent. */
@@ -175,15 +175,13 @@ typedef enum {
 /* Trace object. */
 typedef struct GCtrace {
   GCHeader;
-  uint8_t topslot;	/* Top stack slot already checked to be allocated. */
-  uint8_t linktype;	/* Type of link. */
+  uint16_t nsnap;	/* Number of snapshots. */
   IRRef nins;		/* Next IR instruction. Biased with REF_BIAS. */
   uint32_t unused_gc64;
   GCRef gclist;
   IRIns *ir;		/* IR instructions/constants. Biased with REF_BIAS. */
   IRRef nk;		/* Lowest IR constant. Biased with REF_BIAS. */
-  uint16_t nsnap;	/* Number of snapshots. */
-  uint16_t nsnapmap;	/* Number of snapshot map elements. */
+  uint32_t nsnapmap;	/* Number of snapshot map elements. */
   SnapShot *snap;	/* Snapshot array. */
   SnapEntry *snapmap;	/* Snapshot map. */
   GCRef startpt;	/* Starting prototype. */
@@ -204,6 +202,8 @@ typedef struct GCtrace {
   TraceNo1 parent;      /* Parent of this trace (or 0 for root traces). */
   ExitNo exitno;        /* Exit number in parent (valid for side-traces only). */
   uint8_t sinktags;	/* Trace has SINK tags. */
+  uint8_t topslot;	/* Top stack slot already checked to be allocated. */
+  uint8_t linktype;	/* Type of link. */
   uint8_t unused1;
 } GCtrace;
 
