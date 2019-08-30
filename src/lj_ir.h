@@ -542,9 +542,9 @@ typedef union IRIns {
   TValue tv;		/* TValue constant (overlaps entire slot). */
 } IRIns;
 
-#define ir_isk64(ir)	 ((ir)->o == IR_KNUM || (ir)->o == IR_KINT64 || \
-                          (ir)->o == IR_KGC ||                          \
-                          (ir)->o == IR_KPTR || (ir)->o == IR_KKPTR)
+#define ir_isk64(ir) \
+  ((ir)->o == IR_KNUM || (ir)->o == IR_KINT64 || \
+    (ir)->o == IR_KGC || (ir)->o == IR_KPTR || (ir)->o == IR_KKPTR)
 
 #define ir_kgc(ir)	check_exp((ir)->o == IR_KGC, gcref((ir)[1].gcr))
 #define ir_kstr(ir)	(gco2str(ir_kgc((ir))))
