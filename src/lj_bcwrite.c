@@ -196,11 +196,8 @@ static char *bcwrite_bytecode(BCWriteCtx *ctx, char *p, GCproto *pt)
 	  op == BC_JFORI) {
 	q[LJ_ENDIAN_SELECT(0, 3)] = (uint8_t)(op-BC_IFORL+BC_FORL);
       } else if (op == BC_JFORL || op == BC_JITERL || op == BC_JLOOP) {
-	BCReg rd = q[LJ_ENDIAN_SELECT(2, 1)] + (q[LJ_ENDIAN_SELECT(3, 0)] << 8);
-	BCIns ins = traceref(J, rd)->startins;
-	q[LJ_ENDIAN_SELECT(0, 3)] = (uint8_t)(op-BC_JFORL+BC_FORL);
-	q[LJ_ENDIAN_SELECT(2, 1)] = bc_c(ins);
-	q[LJ_ENDIAN_SELECT(3, 0)] = bc_b(ins);
+	BCReg rd = p[LJ_ENDIAN_SELECT(2, 1)] + (p[LJ_ENDIAN_SELECT(3, 0)] << 8);
+	memcpy(p, &traceref(J, rd)->startins, 4);
       }
     }
   }
