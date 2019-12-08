@@ -19,7 +19,6 @@
 #include "lj_ircall.h"
 #include "lj_iropt.h"
 #include "lj_mcode.h"
-#include "lj_iropt.h"
 #include "lj_trace.h"
 #include "lj_snap.h"
 #include "lj_asm.h"
