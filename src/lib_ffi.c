@@ -719,30 +719,21 @@ LJLIB_CF(ffi_fill)	LJLIB_REC(.)
   return 0;
 }
 
-#define H_(le, be)	LJ_ENDIAN_SELECT(0x##le, 0x##be)
-
 /* Test ABI string. */
 LJLIB_CF(ffi_abi)	LJLIB_REC(.)
 {
   GCstr *s = lj_lib_checkstr(L, 1);
-  int b = 0;
-  switch (s->hash) {
-  case H_(849858eb,ad35fd06): b = 1; break;  /* 64bit */
-#if LJ_ARCH_HASFPU
-  case H_(e33ee463,e33ee463): b = 1; break;  /* fpu */
-#endif
-  case H_(539417a8,8ce0812f): b = 1; break;  /* hardfp */
-  case H_(3af93066,1f001464): b = 1; break;  /* le/be */
-  case H_(9e89d2c9,13c83c92): b = 1; break;  /* gc64 */
-  default:
-    break;
-  }
+  int b = lj_cparse_case(s,
+    "\00564bit"
+    "\003fpu"
+    "\006hardfp"
+    "\002le"
+    "\004gc64"
+  ) >= 0;
   setboolV(L->top-1, b);
   setboolV(&G(L)->tmptv2, b);  /* Remember for trace recorder. */
   return 1;
 }
-
-#undef H_
 
 LJLIB_PUSH(top-8) LJLIB_SET(!)  /* Store reference to miscmap table. */
 

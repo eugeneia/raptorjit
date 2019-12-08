@@ -59,5 +59,6 @@ typedef struct CPState {
 
 LJ_FUNC int lj_cparse(CPState *cp);
 
+LJ_FUNC int lj_cparse_case(GCstr *str, const char *match);
 
 #endif
