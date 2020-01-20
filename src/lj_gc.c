@@ -23,6 +23,7 @@
 #include "lj_ctype.h"
 #include "lj_cdata.h"
 #include "lj_trace.h"
+#include "lj_dispatch.h"
 #include "lj_vm.h"
 
 #define GCSTEPSIZE	1024u
