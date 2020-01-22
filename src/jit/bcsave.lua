@@ -132,8 +132,8 @@ end
 local function bcsave_c(ctx, output, s)
   local fp = savefile(output, "w")
   if ctx.type == "c" then
-    fp:write(format([[
-#ifdef _cplusplus
+    fp:write(string.format([[
+#ifdef __cplusplus
 extern "C"
 #endif
 #ifdef _WIN32
