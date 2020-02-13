@@ -101,8 +101,8 @@ static void lex_number(LexState *ls, TValue *tv)
     lex_savenext(ls);
   }
   lex_save(ls, '\0');
-  fmt = lj_strscan_scan((const uint8_t *)sbufB(&ls->sb), tv,
-                        STRSCAN_OPT_TONUM|STRSCAN_OPT_LL|STRSCAN_OPT_IMAG);
+  fmt = lj_strscan_scan((const uint8_t *)sbufB(&ls->sb), sbuflen(&ls->sb)-1, tv,
+	  STRSCAN_OPT_TONUM |STRSCAN_OPT_LL|STRSCAN_OPT_IMAG);
   if (fmt == STRSCAN_NUM) {
     /* Already in correct format. */
   } else if (fmt != STRSCAN_ERROR) {
