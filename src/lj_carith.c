@@ -261,7 +261,7 @@ int lj_carith_op(lua_State *L, MMS mm)
 {
   CTState *cts = ctype_cts(L);
   CDArith ca;
-  if (carith_checkarg(L, cts, &ca)) {
+  if (carith_checkarg(L, cts, &ca) && mm != MM_len && mm != MM_concat) {
     if (carith_int64(L, cts, &ca, mm) || carith_ptr(L, cts, &ca, mm)) {
       copyTV(L, &G(L)->tmptv2, L->top-1);  /* Remember for trace recorder. */
       return 1;
@@ -294,15 +294,6 @@ uint64_t lj_carith_shift64(uint64_t x, int32_t sh, int op)
   default: lua_assert(0); break;
   }
   return x;
-}
-
-/* No built-in functionality for length of cdata. */
-int lj_carith_len(lua_State *L)
-{
-  CTState *cts = ctype_cts(L);
-  CDArith ca;
-  carith_checkarg(L, cts, &ca);
-  return lj_carith_meta(L, cts, &ca, MM_len);
 }
 
 /* Equivalent to lj_lib_checkbit(), but handles cdata. */
