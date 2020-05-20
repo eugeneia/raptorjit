@@ -109,8 +109,8 @@ LJLIB_CF(jit_status)
   jit_State *J = L2J(L);
   L->top = L->base;
   setboolV(L->top++, (J->flags & JIT_F_ON) ? 1 : 0);
-  flagbits_to_strings(L, J->flags, JIT_F_CPU_FIRST, JIT_F_CPUSTRING);
-  flagbits_to_strings(L, J->flags, JIT_F_OPT_FIRST, JIT_F_OPTSTRING);
+  flagbits_to_strings(L, J->flags, JIT_F_CPU, JIT_F_CPUSTRING);
+  flagbits_to_strings(L, J->flags, JIT_F_OPT, JIT_F_OPTSTRING);
   return (int)(L->top - L->base);
 }
 
@@ -162,7 +162,7 @@ static int jitopt_flag(jit_State *J, const char *str)
     str += str[2] == '-' ? 3 : 2;
     set = 0;
   }
-  for (opt = JIT_F_OPT_FIRST; ; opt <<= 1) {
+  for (opt = JIT_F_OPT; ; opt <<= 1) {
     size_t len = *(const uint8_t *)lst;
     if (len == 0)
       break;
@@ -278,41 +278,29 @@ JIT_PARAMDEF(JIT_PARAMINIT)
   0
 };
 
-/* Arch-dependent CPU detection. */
-static uint32_t jit_cpudetect(lua_State *L)
+/* Arch-dependent CPU feature detection. */
+static uint32_t jit_cpudetect(void)
 {
   uint32_t flags = 0;
   uint32_t vendor[4];
   uint32_t features[4];
   if (lj_vm_cpuid(0, vendor) && lj_vm_cpuid(1, features)) {
-    flags |= ((features[3] >> 26)&1) * JIT_F_SSE2;
     flags |= ((features[2] >> 0)&1) * JIT_F_SSE3;
     flags |= ((features[2] >> 19)&1) * JIT_F_SSE4_1;
-    if (vendor[2] == 0x6c65746e) {  /* Intel. */
-      if ((features[0] & 0x0fff0ff0) == 0x000106c0)  /* Atom. */
-	flags |= JIT_F_LEA_AGU;
-    } else if (vendor[2] == 0x444d4163) {  /* AMD. */
-      uint32_t fam = (features[0] & 0x0ff00f00);
-      if (fam >= 0x00000f00)  /* K8, K10. */
-	flags |= JIT_F_PREFER_IMUL;
-    }
     if (vendor[0] >= 7) {
       uint32_t xfeatures[4];
       lj_vm_cpuid(7, xfeatures);
       flags |= ((xfeatures[1] >> 8)&1) * JIT_F_BMI2;
     }
   }
-  /* Check for required instruction set support on x86 (unnecessary on x64). */
-  UNUSED(L);
   return flags;
 }
 
 /* Initialize JIT compiler. */
 static void jit_init(lua_State *L)
 {
-  uint32_t flags = jit_cpudetect(L);
   jit_State *J = L2J(L);
-  J->flags = flags | JIT_F_ON | JIT_F_OPT_DEFAULT;
+  J->flags = jit_cpudetect() | JIT_F_ON | JIT_F_OPT_DEFAULT;
   memcpy(J->param, jit_param_default, sizeof(J->param));
   lj_dispatch_update(G(L));
 }

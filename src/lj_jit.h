@@ -9,37 +9,37 @@
 #include "lj_obj.h"
 #include "lj_ir.h"
 
-/* JIT engine flags. */
+/* -- JIT engine flags ---------------------------------------------------- */
+
+/* General JIT engine flags. 4 bits. */
 #define JIT_F_ON		0x00000001
 
-/* CPU-specific JIT engine flags. */
-#define JIT_F_SSE2		0x00000010
-#define JIT_F_SSE3		0x00000020
-#define JIT_F_SSE4_1		0x00000040
-#define JIT_F_PREFER_IMUL	0x00000080
-#define JIT_F_LEA_AGU		0x00000100
-#define JIT_F_BMI2		0x00000200
+/* CPU-specific JIT engine flags. 12 bits. Flags and strings must match. */
+#define JIT_F_CPU		0x00000010
 
-/* Names for the CPU-specific flags. Must match the order above. */
-#define JIT_F_CPU_FIRST		JIT_F_SSE2
-#define JIT_F_CPUSTRING		"\4SSE2\4SSE3\6SSE4.1\3AMD\4ATOM\4BMI2"
+#define JIT_F_SSE3		(JIT_F_CPU << 0)
+#define JIT_F_SSE4_1		(JIT_F_CPU << 1)
+#define JIT_F_BMI2		(JIT_F_CPU << 2)
 
-/* Optimization flags. */
+
+#define JIT_F_CPUSTRING		"\4SSE3\6SSE4.1\4BMI2"
+
+/* Optimization flags. 12 bits. */
+#define JIT_F_OPT		0x00010000
 #define JIT_F_OPT_MASK		0x0fff0000
 
-#define JIT_F_OPT_FOLD		0x00010000
-#define JIT_F_OPT_CSE		0x00020000
-#define JIT_F_OPT_DCE		0x00040000
-#define JIT_F_OPT_FWD		0x00080000
-#define JIT_F_OPT_DSE		0x00100000
-#define JIT_F_OPT_NARROW	0x00200000
-#define JIT_F_OPT_LOOP		0x00400000
-#define JIT_F_OPT_ABC		0x00800000
-#define JIT_F_OPT_SINK		0x01000000
-#define JIT_F_OPT_FUSE		0x02000000
+#define JIT_F_OPT_FOLD		(JIT_F_OPT << 0)
+#define JIT_F_OPT_CSE		(JIT_F_OPT << 1)
+#define JIT_F_OPT_DCE		(JIT_F_OPT << 2)
+#define JIT_F_OPT_FWD		(JIT_F_OPT << 3)
+#define JIT_F_OPT_DSE		(JIT_F_OPT << 4)
+#define JIT_F_OPT_NARROW	(JIT_F_OPT << 5)
+#define JIT_F_OPT_LOOP		(JIT_F_OPT << 6)
+#define JIT_F_OPT_ABC		(JIT_F_OPT << 7)
+#define JIT_F_OPT_SINK		(JIT_F_OPT << 8)
+#define JIT_F_OPT_FUSE		(JIT_F_OPT << 9)
 
 /* Optimizations names for -O. Must match the order above. */
-#define JIT_F_OPT_FIRST		JIT_F_OPT_FOLD
 #define JIT_F_OPTSTRING	\
   "\4fold\3cse\3dce\3fwd\3dse\6narrow\4loop\3abc\4sink\4fuse"
 
@@ -50,6 +50,8 @@
 #define JIT_F_OPT_3	(JIT_F_OPT_2|\
   JIT_F_OPT_FWD|JIT_F_OPT_DSE|JIT_F_OPT_ABC|JIT_F_OPT_SINK|JIT_F_OPT_FUSE)
 #define JIT_F_OPT_DEFAULT	JIT_F_OPT_3
+
+/* -- JIT engine parameters ----------------------------------------------- */
 
 /* See: http://blogs.msdn.com/oldnewthing/archive/2003/10/08/55239.aspx */
 #define JIT_P_sizemcode_DEFAULT		64
@@ -87,6 +89,8 @@ JIT_PARAMDEF(JIT_PARAMENUM)
 
 #define JIT_PARAMSTR(len, name, value)	#len #name
 #define JIT_P_STRING	JIT_PARAMDEF(JIT_PARAMSTR)
+
+/* -- JIT engine data structures ------------------------------------------ */
 
 /* Trace compiler state. */
 typedef enum {

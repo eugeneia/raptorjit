@@ -97,7 +97,7 @@ ERRDEF(STRFMT,	"invalid option " LUA_QS " to " LUA_QL("format"))
 ERRDEF(STRGSRV,	"invalid replacement value (a %s)")
 ERRDEF(BADMODN,	"name conflict for module " LUA_QS)
 ERRDEF(JITPROT,	"runtime code generation failed, restricted kernel?")
-ERRDEF(NOJIT,	"JIT compiler disabled, CPU does not support SSE2")
+ERRDEF(NOJIT,	"JIT compiler disabled")
 ERRDEF(JITOPT,	"unknown or malformed optimization flag " LUA_QS)
 ERRDEF(AUDITLOG,"auditlog could not be opened (already open?)")
 
