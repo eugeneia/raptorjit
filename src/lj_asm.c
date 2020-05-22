@@ -1458,7 +1458,6 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_DIV: asm_div(as, ir); break;
   case IR_POW: asm_pow(as, ir); break;
   case IR_ABS: asm_abs(as, ir); break;
-  case IR_ATAN2: asm_atan2(as, ir); break;
   case IR_LDEXP: asm_ldexp(as, ir); break;
   case IR_FPMATH: asm_fpmath(as, ir); break;
   case IR_TOBIT: asm_tobit(as, ir); break;
@@ -1874,7 +1873,6 @@ static void asm_setup_regsp(ASMState *as)
       if (inloop)
 	as->modset = RSET_SCRATCH;
       break;
-    case IR_ATAN2:
     case IR_POW:
       if (!LJ_SOFTFP && irt_isnum(ir->t)) {
 	if (inloop)
