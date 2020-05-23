@@ -56,13 +56,37 @@ double lj_vm_log2(double a)
 }
 #endif
 
-#ifdef LUAJIT_NO_EXP2
-double lj_vm_exp2(double a)
+/* Unsigned x^k. */
+static double lj_vm_powui(double x, uint32_t k)
 {
-  return exp(a * 0.6931471805599453);
+  double y;
+  lua_assert(k != 0);
+  for (; (k & 1) == 0; k >>= 1) x *= x;
+  y = x;
+  if ((k >>= 1) != 0) {
+    for (;;) {
+      x *= x;
+      if (k == 1) break;
+      if (k & 1) y *= x;
+      k >>= 1;
+    }
+    y *= x;
+  }
+  return y;
 }
-#endif
 
+/* Signed x^k. */
+double lj_vm_powi(double x, int32_t k)
+{
+  if (k > 1)
+    return lj_vm_powui(x, (uint32_t)k);
+  else if (k == 1)
+    return x;
+  else if (k == 0)
+    return 1.0;
+  else
+    return 1.0 / lj_vm_powui(x, (uint32_t)-k);
+}
 
 /* Computes fpm(x) for extended math functions. */
 double lj_vm_foldfpm(double x, int fpm)
@@ -72,7 +96,6 @@ double lj_vm_foldfpm(double x, int fpm)
   case IRFPM_CEIL: return lj_vm_ceil(x);
   case IRFPM_TRUNC: return lj_vm_trunc(x);
   case IRFPM_SQRT: return sqrt(x);
-  case IRFPM_EXP2: return lj_vm_exp2(x);
   case IRFPM_LOG: return log(x);
   case IRFPM_LOG2: return lj_vm_log2(x);
   default: lua_assert(0);

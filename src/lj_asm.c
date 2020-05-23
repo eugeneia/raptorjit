@@ -1137,30 +1137,6 @@ static void asm_call(ASMState *as, IRIns *ir)
   asm_gencall(as, ci, args);
 }
 
-static void asm_fppow(ASMState *as, IRIns *ir, IRRef lref, IRRef rref)
-{
-  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_pow];
-  IRRef args[2];
-  args[0] = lref;
-  args[1] = rref;
-  asm_setupresult(as, ir, ci);
-  asm_gencall(as, ci, args);
-}
-
-static int asm_fpjoin_pow(ASMState *as, IRIns *ir)
-{
-  IRIns *irp = IR(ir->op1);
-  if (irp == ir-1 && irp->o == IR_MUL && !ra_used(irp)) {
-    IRIns *irpp = IR(irp->op1);
-    if (irpp == ir-2 && irpp->o == IR_FPMATH &&
-	irpp->op2 == IRFPM_LOG2 && !ra_used(irpp)) {
-      asm_fppow(as, ir, irpp->op1, irp->op2);
-      return 1;
-    }
-  }
-  return 0;
-}
-
 /* -- PHI and loop handling ----------------------------------------------- */
 
 /* Break a PHI cycle by renaming to a free register (evict if needed). */
@@ -1405,6 +1381,49 @@ static void asm_loop(ASMState *as)
 
 #include "lj_asm_x86.h"
 
+/* -- Common instruction helpers ------------------------------------------ */
+
+static void asm_pow(ASMState *as, IRIns *ir)
+{
+  if (!irt_isnum(ir->t))
+    asm_callid(as, ir, irt_isi64(ir->t) ? IRCALL_lj_carith_powi64 :
+					  IRCALL_lj_carith_powu64);
+  else
+  if (irt_isnum(IR(ir->op2)->t))
+    asm_callid(as, ir, IRCALL_pow);
+  else
+    asm_fppowi(as, ir);
+}
+
+static void asm_div(ASMState *as, IRIns *ir)
+{
+  if (!irt_isnum(ir->t))
+    asm_callid(as, ir, irt_isi64(ir->t) ? IRCALL_lj_carith_divi64 :
+					  IRCALL_lj_carith_divu64);
+  else
+    asm_fpdiv(as, ir);
+}
+
+static void asm_mod(ASMState *as, IRIns *ir)
+{
+  if (!irt_isint(ir->t))
+    asm_callid(as, ir, irt_isi64(ir->t) ? IRCALL_lj_carith_modi64 :
+					  IRCALL_lj_carith_modu64);
+  else
+    asm_callid(as, ir, IRCALL_lj_vm_modi);
+}
+
+static void asm_fuseequal(ASMState *as, IRIns *ir)
+{
+  /* Fuse HREF + EQ/NE. */
+  if ((ir-1)->o == IR_HREF && ir->op1 == as->curins-1) {
+    as->curins--;
+    asm_href(as, ir-1, (IROp)ir->o);
+  } else {
+    asm_equal(as, ir);
+  }
+}
+
 /* -- Instruction dispatch ------------------------------------------------ */
 
 /* Assemble a single instruction. */
@@ -1426,14 +1445,7 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_ABC:
     asm_comp(as, ir);
     break;
-  case IR_EQ: case IR_NE:
-    if ((ir-1)->o == IR_HREF && ir->op1 == as->curins-1) {
-      as->curins--;
-      asm_href(as, ir-1, (IROp)ir->o);
-    } else {
-      asm_equal(as, ir);
-    }
-    break;
+  case IR_EQ: case IR_NE: asm_fuseequal(as, ir); break;
 
   case IR_RETF: asm_retf(as, ir); break;
 
@@ -1495,7 +1507,9 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_SNEW: case IR_XSNEW: asm_snew(as, ir); break;
   case IR_TNEW: asm_tnew(as, ir); break;
   case IR_TDUP: asm_tdup(as, ir); break;
-  case IR_CNEW: case IR_CNEWI: asm_cnew(as, ir); break;
+  case IR_CNEW: case IR_CNEWI:
+    asm_cnew(as, ir);
+    break;
 
   /* Buffer operations. */
   case IR_BUFHDR: asm_bufhdr(as, ir); break;

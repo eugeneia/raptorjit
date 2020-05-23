@@ -230,10 +230,11 @@ LJFOLDF(kfold_fpcall2)
 }
 
 LJFOLD(POW KNUM KINT)
+LJFOLD(POW KNUM KNUM)
 LJFOLDF(kfold_numpow)
 {
   lua_Number a = knumleft;
-  lua_Number b = (lua_Number)fright->i;
+  lua_Number b = fright->o == IR_KINT ? (lua_Number)fright->i : knumright;
   lua_Number y = lj_vm_foldarith(a, b, IR_POW - IR_ADD);
   return lj_ir_knum(J, y);
 }
@@ -1027,7 +1028,7 @@ LJFOLDF(simplify_nummuldiv_negneg)
 }
 
 LJFOLD(POW any KINT)
-LJFOLDF(simplify_numpow_xk)
+LJFOLDF(simplify_numpow_xkint)
 {
   int32_t k = fright->i;
   TRef ref = fins->op1;
@@ -1056,11 +1057,20 @@ LJFOLDF(simplify_numpow_xk)
   return ref;
 }
 
+LJFOLD(POW any KNUM)
+LJFOLDF(simplify_numpow_xknum)
+{
+  if (knumright == 0.5)  /* x ^ 0.5 ==> sqrt(x) */
+    return emitir(IRTN(IR_FPMATH), fins->op1, IRFPM_SQRT);
+  return NEXTFOLD;
+}
+
 LJFOLD(POW KNUM any)
 LJFOLDF(simplify_numpow_kx)
 {
   lua_Number n = knumleft;
-  if (n == 2.0) {  /* 2.0 ^ i ==> ldexp(1.0, tonum(i)) */
+  if (n == 2.0 && irt_isint(fright->t)) {  /* 2.0 ^ i ==> ldexp(1.0, i) */
+    /* Different IR_LDEXP calling convention on x86/x64 requires conversion. */
     fins->o = IR_CONV;
     fins->op1 = fins->op2;
     fins->op2 = IRCONV_NUM_INT;
