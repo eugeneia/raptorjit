@@ -105,7 +105,8 @@ static int io_file_close(lua_State *L, IOFileUD *iof)
     ok = (stat != -1);
 #endif
   } else {
-    lua_assert((iof->type & IOFILE_TYPE_MASK) == IOFILE_TYPE_STDF);
+    lj_assertL((iof->type & IOFILE_TYPE_MASK) == IOFILE_TYPE_STDF,
+	       "close of unknown FILE* type");
     setnilV(L->top++);
     lua_pushliteral(L, "cannot close standard file");
     return 2;

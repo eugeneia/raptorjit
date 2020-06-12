@@ -312,7 +312,7 @@ static void callhook(lua_State *L, int event, BCLine line)
     lj_state_checkstack(L, 1+LUA_MINSTACK);
     hook_enter(g);
     hookf(L, &ar);
-    lua_assert(hook_active(g));
+    lj_assertG(hook_active(g), "active hook flag removed");
     setgcref(g->cur_L, obj2gco(L));
     hook_leave(g);
   }
@@ -355,7 +355,8 @@ void lj_dispatch_ins(lua_State *L, const BCIns *pc)
 #endif
       J->L = L;
       lj_trace_ins(J, pc-1);  /* The interpreter bytecode PC is offset by 1. */
-      lua_assert(L->top - L->base == delta);
+      lj_assertG(L->top - L->base == delta,
+		 "unbalanced stack after tracing of instruction");
     }
   }
   if ((g->hookmask & LUA_MASKCOUNT) && g->hookcount == 0) {
@@ -411,7 +412,8 @@ ASMFunction lj_dispatch_call(lua_State *L, const BCIns *pc)
 #endif
     pc = (const BCIns *)((uintptr_t)pc & ~(uintptr_t)1);
     lj_trace_hot(J, pc);
-    lua_assert(L->top - L->base == delta);
+    lj_assertG(L->top - L->base == delta,
+	       "unbalanced stack after hot call");
     goto out;
   } else if (J->state != LJ_TRACE_IDLE &&
 	     !(g->hookmask & HOOK_GC)) {
@@ -420,7 +422,8 @@ ASMFunction lj_dispatch_call(lua_State *L, const BCIns *pc)
 #endif
     /* Record the FUNC* bytecodes, too. */
     lj_trace_ins(J, pc-1);  /* The interpreter bytecode PC is offset by 1. */
-    lua_assert(L->top - L->base == delta);
+    lj_assertG(L->top - L->base == delta,
+	       "unbalanced stack after hot instruction");
   }
   if ((g->hookmask & LUA_MASKCALL)) {
     int i;

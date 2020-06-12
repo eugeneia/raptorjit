@@ -87,4 +87,10 @@ LJ_FUNC void lj_lex_endlog(LexState *ls);
 LJ_FUNC_NORET void lj_lex_error(LexState *ls, LexToken tok, ErrMsg em, ...);
 LJ_FUNC void lj_lex_init(lua_State *L);
 
+#ifdef LUA_USE_ASSERT
+#define lj_assertLS(c, ...)	(lj_assertG_(G(ls->L), (c), __VA_ARGS__))
+#else
+#define lj_assertLS(c, ...)	((void)ls)
+#endif
+
 #endif

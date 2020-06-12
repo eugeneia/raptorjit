@@ -155,7 +155,8 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
       lj_err_callerv(L, LJ_ERR_FFI_NODECL, strdata(name));
     if (ctype_isconstval(ct->info)) {
       CType *ctt = ctype_child(cts, ct);
-      lua_assert(ctype_isinteger(ctt->info) && ctt->size <= 4);
+      lj_assertCTS(ctype_isinteger(ctt->info) && ctt->size <= 4,
+		   "only 32 bit const supported");  /* NYI */
       if ((ctt->info & CTF_UNSIGNED) && (int32_t)ct->size < 0)
 	setnumV(tv, (lua_Number)(uint32_t)ct->size);
       else
@@ -164,7 +165,8 @@ TValue *lj_clib_index(lua_State *L, CLibrary *cl, GCstr *name)
       const char *sym = clib_extsym(cts, ct, name);
       void *p = clib_getsym(cl, sym);
       GCcdata *cd;
-      lua_assert(ctype_isfunc(ct->info) || ctype_isextern(ct->info));
+      lj_assertCTS(ctype_isfunc(ct->info) || ctype_isextern(ct->info),
+		   "unexpected ctype %08x in clib", ct->info);
       if (!p)
 	clib_error(L, "cannot resolve symbol " LUA_QS ": %s", sym);
       cd = lj_cdata_new(cts, id, CTSIZE_PTR);

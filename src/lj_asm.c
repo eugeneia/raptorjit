@@ -91,6 +91,12 @@ typedef struct ASMState {
   uint16_t parentmap[LJ_MAX_JSLOTS];  /* Parent instruction to RegSP map. */
 } ASMState;
 
+#ifdef LUA_USE_ASSERT
+#define lj_assertA(c, ...)	lj_assertG_(J2G(as->J), (c), __VA_ARGS__)
+#else
+#define lj_assertA(c, ...)	((void)as)
+#endif
+
 #define IR(ref)			(&as->ir[(ref)])
 
 #define ASMREF_TMP1		REF_TRUE	/* Temp. register. */
@@ -122,9 +128,8 @@ static LJ_AINLINE void checkmclim(ASMState *as)
 #ifdef LUA_USE_ASSERT
   if (as->mcp + MCLIM_REDZONE < as->mcp_prev) {
     IRIns *ir = IR(as->curins+1);
-    fprintf(stderr, "RED ZONE OVERFLOW: %p IR %04d  %02d %04d %04d\n", as->mcp,
-	    as->curins+1-REF_BIAS, ir->o, ir->op1-REF_BIAS, ir->op2-REF_BIAS);
-    lua_assert(0);
+    lj_assertA(0, "red zone overflow: %p IR %04d  %02d %04d %04d\n", as->mcp,
+      as->curins+1-REF_BIAS, ir->o, ir->op1-REF_BIAS, ir->op2-REF_BIAS);
   }
 #endif
   if (LJ_UNLIKELY(as->mcp < as->mclim)) asm_mclimit(as);
@@ -226,7 +231,7 @@ static void ra_dprintf(ASMState *as, const char *fmt, ...)
 	  *p++ = *q >= 'A' && *q <= 'Z' ? *q + 0x20 : *q;
       } else {
 	*p++ = '?';
-	lua_assert(0);
+	lj_assertA(0, "bad register %d for debug format \"%s\"", r, fmt);
       }
     } else if (e[1] == 'f' || e[1] == 'i') {
       IRRef ref;
@@ -244,7 +249,7 @@ static void ra_dprintf(ASMState *as, const char *fmt, ...)
     } else if (e[1] == 'x') {
       p += sprintf(p, "%08x", va_arg(argp, int32_t));
     } else {
-      lua_assert(0);
+      lj_assertA(0, "bad debug format code");
     }
     fmt = e+2;
   }
@@ -303,7 +308,7 @@ static Reg ra_rematk(ASMState *as, IRRef ref)
   Reg r;
   if (ra_iskref(ref)) {
     r = ra_krefreg(ref);
-    lua_assert(!rset_test(as->freeset, r));
+    lj_assertA(!rset_test(as->freeset, r), "rematk of free reg %d", r);
     ra_free(as, r);
     ra_modified(as, r);
     emit_loadu64(as, r, ra_krefk(as, ref));
@@ -311,7 +316,9 @@ static Reg ra_rematk(ASMState *as, IRRef ref)
   }
   ir = IR(ref);
   r = ir->r;
-  lua_assert(ra_hasreg(r) && !ra_hasspill(ir->s));
+  lj_assertA(ra_hasreg(r), "rematk of K%03d has no reg", REF_BIAS - ref);
+  lj_assertA(!ra_hasspill(ir->s),
+	     "rematk of K%03d has spill slot [%x]", REF_BIAS - ref, ir->s);
   ra_free(as, r);
   ra_modified(as, r);
   ir->r = RID_INIT;  /* Do not keep any hint. */
@@ -323,7 +330,8 @@ static Reg ra_rematk(ASMState *as, IRRef ref)
     ra_sethint(ir->r, RID_BASE);  /* Restore BASE register hint. */
     emit_getgl(as, r, jit_base);
   } else if (emit_canremat(ASMREF_L) && ir->o == IR_KPRI) {
-    lua_assert(irt_isnil(ir->t));  /* REF_NIL stores ASMREF_L register. */
+    /* REF_NIL stores ASMREF_L register. */
+    lj_assertA(irt_isnil(ir->t), "rematk of bad ASMREF_L");
     emit_getgl(as, r, cur_L);
   } else if (ir->o == IR_KINT64) {
     emit_loadu64(as, r, ir_kint64(ir)->u64);
@@ -332,8 +340,9 @@ static Reg ra_rematk(ASMState *as, IRRef ref)
   } else if (ir->o == IR_KPTR || ir->o == IR_KKPTR) {
     emit_loadu64(as, r, (uintptr_t)ir_kptr(ir));
   } else {
-    lua_assert(ir->o == IR_KINT || ir->o == IR_KGC ||
-	       ir->o == IR_KPTR || ir->o == IR_KKPTR || ir->o == IR_KNULL);
+    lj_assertA(ir->o == IR_KINT || ir->o == IR_KGC ||
+	       ir->o == IR_KPTR || ir->o == IR_KKPTR || ir->o == IR_KNULL,
+	       "rematk of bad IR op %d", ir->o);
     emit_loadi(as, r, ir->i);
   }
   return r;
@@ -343,7 +352,8 @@ static Reg ra_rematk(ASMState *as, IRRef ref)
 static int32_t ra_spill(ASMState *as, IRIns *ir)
 {
   int32_t slot = ir->s;
-  lua_assert(ir >= as->ir + REF_TRUE);
+  lj_assertA(ir >= as->ir + REF_TRUE,
+	     "spill of K%03d", REF_BIAS - (int)(ir - as->ir));
   if (!ra_hasspill(slot)) {
     if (irt_is64(ir->t)) {
       slot = as->evenspill;
@@ -368,7 +378,9 @@ static Reg ra_releasetmp(ASMState *as, IRRef ref)
 {
   IRIns *ir = IR(ref);
   Reg r = ir->r;
-  lua_assert(ra_hasreg(r) && !ra_hasspill(ir->s));
+  lj_assertA(ra_hasreg(r), "release of TMP%d has no reg", ref-ASMREF_TMP1+1);
+  lj_assertA(!ra_hasspill(ir->s),
+	     "release of TMP%d has spill slot [%x]", ref-ASMREF_TMP1+1, ir->s);
   ra_free(as, r);
   ra_modified(as, r);
   ir->r = RID_INIT;
@@ -384,7 +396,7 @@ static Reg ra_restore(ASMState *as, IRRef ref)
     IRIns *ir = IR(ref);
     int32_t ofs = ra_spill(as, ir);  /* Force a spill slot. */
     Reg r = ir->r;
-    lua_assert(ra_hasreg(r));
+    lj_assertA(ra_hasreg(r), "restore of IR %04d has no reg", ref - REF_BIAS);
     ra_sethint(ir->r, r);  /* Keep hint. */
     ra_free(as, r);
     if (!rset_test(as->weakset, r)) {  /* Only restore non-weak references. */
@@ -413,14 +425,15 @@ static Reg ra_evict(ASMState *as, RegSet allow)
 {
   IRRef ref;
   RegCost cost = ~(RegCost)0;
-  lua_assert(allow != RSET_EMPTY);
+  lj_assertA(allow != RSET_EMPTY, "evict from empty set");
   if (RID_NUM_FPR == 0 || allow < RID2RSET(RID_MAX_GPR)) {
     GPRDEF(MINCOST)
   } else {
     FPRDEF(MINCOST)
   }
   ref = regcost_ref(cost);
-  lua_assert(ra_iskref(ref) || (ref >= as->T->nk && ref < as->T->nins));
+  lj_assertA(ra_iskref(ref) || (ref >= as->T->nk && ref < as->T->nins),
+	     "evict of out-of-range IR %04d", ref - REF_BIAS);
   /* Preferably pick any weak ref instead of a non-weak, non-const ref. */
   if (!irref_isk(ref) && (as->weakset & allow)) {
     IRIns *ir = IR(ref);
@@ -564,7 +577,8 @@ static Reg ra_allocref(ASMState *as, IRRef ref, RegSet allow)
   IRIns *ir = IR(ref);
   RegSet pick = as->freeset & allow;
   Reg r;
-  lua_assert(ra_noreg(ir->r));
+  lj_assertA(ra_noreg(ir->r),
+	     "IR %04d already has reg %d", ref - REF_BIAS, ir->r);
   if (pick) {
     /* First check register hint from propagation or PHI. */
     if (ra_hashint(ir->r)) {
@@ -628,8 +642,10 @@ static void ra_rename(ASMState *as, Reg down, Reg up)
   IRIns *ir = IR(ref);
   ir->r = (uint8_t)up;
   as->cost[down] = 0;
-  lua_assert((down < RID_MAX_GPR) == (up < RID_MAX_GPR));
-  lua_assert(!rset_test(as->freeset, down) && rset_test(as->freeset, up));
+  lj_assertA((down < RID_MAX_GPR) == (up < RID_MAX_GPR),
+	     "rename between GPR/FPR %d and %d", down, up);
+  lj_assertA(!rset_test(as->freeset, down), "rename from free reg %d", down);
+  lj_assertA(rset_test(as->freeset, up), "rename to non-free reg %d", up);
   ra_free(as, down);  /* 'down' is free ... */
   ra_modified(as, down);
   rset_clear(as->freeset, up);  /* ... and 'up' is now allocated. */
@@ -670,7 +686,7 @@ static void ra_destreg(ASMState *as, IRIns *ir, Reg r)
 {
   Reg dest = ra_dest(as, ir, RID2RSET(r));
   if (dest != r) {
-    lua_assert(rset_test(as->freeset, r));
+    lj_assertA(rset_test(as->freeset, r), "dest reg %d is not free", r);
     ra_modified(as, r);
     emit_movrr(as, ir, dest, r);
   }
@@ -698,8 +714,9 @@ static void ra_left(ASMState *as, Reg dest, IRRef lref)
 	emit_loadk64(as, dest, ir);
 	return;
       } else if (ir->o != IR_KPRI) {
-	lua_assert(ir->o == IR_KINT || ir->o == IR_KGC ||
-		   ir->o == IR_KPTR || ir->o == IR_KKPTR || ir->o == IR_KNULL);
+	lj_assertA(ir->o == IR_KINT || ir->o == IR_KGC ||
+		   ir->o == IR_KPTR || ir->o == IR_KKPTR || ir->o == IR_KNULL,
+		   "K%03d has bad IR op %d", REF_BIAS - lref, ir->o);
 	emit_loadi(as, dest, ir->i);
 	return;
       }
@@ -763,11 +780,14 @@ static void asm_snap_alloc1(ASMState *as, IRRef ref)
       } else
       {  /* Allocate stored values for TNEW, TDUP and CNEW. */
 	IRIns *irs;
-	lua_assert(ir->o == IR_TNEW || ir->o == IR_TDUP || ir->o == IR_CNEW);
+	lj_assertA(ir->o == IR_TNEW || ir->o == IR_TDUP || ir->o == IR_CNEW,
+		   "sink of IR %04d has bad op %d", ref - REF_BIAS, ir->o);
 	for (irs = IR(as->snapref-1); irs > ir; irs--)
 	  if (irs->r == RID_SINK && asm_sunk_store(as, ir, irs)) {
-	    lua_assert(irs->o == IR_ASTORE || irs->o == IR_HSTORE ||
-		       irs->o == IR_FSTORE || irs->o == IR_XSTORE);
+	    lj_assertA(irs->o == IR_ASTORE || irs->o == IR_HSTORE ||
+		       irs->o == IR_FSTORE || irs->o == IR_XSTORE,
+		       "sunk store IR %04d has bad op %d",
+		       (int)(irs - as->ir) - REF_BIAS, irs->o);
 	    asm_snap_alloc1(as, irs->op2);
 	  }
       }
@@ -812,7 +832,9 @@ static void asm_snap_alloc(ASMState *as)
     if (!irref_isk(ref)) {
       asm_snap_alloc1(as, ref);
       if (LJ_SOFTFP && (sn & SNAP_SOFTFPNUM)) {
-	lua_assert(irt_type(IR(ref+1)->t) == IRT_SOFTFP);
+	lj_assertA(irt_type(IR(ref+1)->t) == IRT_SOFTFP,
+		   "snap %d[%d] points to bad SOFTFP IR %04d",
+		   as->snapno, n, ref - REF_BIAS);
 	asm_snap_alloc1(as, ref+1);
       }
     }
@@ -876,19 +898,20 @@ static int32_t asm_stack_adjust(ASMState *as)
 }
 
 /* Must match with hash*() in lj_tab.c. */
-static uint32_t ir_khash(IRIns *ir)
+static uint32_t ir_khash(ASMState *as, IRIns *ir)
 {
   uint32_t lo, hi;
+  UNUSED(as);
   if (irt_isstr(ir->t)) {
     return ir_kstr(ir)->hash;
   } else if (irt_isnum(ir->t)) {
     lo = ir_knum(ir)->u32.lo;
     hi = ir_knum(ir)->u32.hi << 1;
   } else if (irt_ispri(ir->t)) {
-    lua_assert(!irt_isnil(ir->t));
+    lj_assertA(!irt_isnil(ir->t), "hash of nil key");
     return irt_type(ir->t)-IRT_FALSE;
   } else {
-    lua_assert(irt_isgcv(ir->t));
+    lj_assertA(irt_isgcv(ir->t), "hash of bad IR type %d", irt_type(ir->t));
     lo = u32ptr(ir_kgc(ir));
     hi = (uint32_t)(u64ptr(ir_kgc(ir)) >> 32) | (irt_toitype(ir->t) << 15);
   }
@@ -988,7 +1011,8 @@ static void asm_bufput(ASMState *as, IRIns *ir)
   args[0] = ir->op1;  /* SBuf * */
   args[1] = ir->op2;  /* GCstr * */
   irs = IR(ir->op2);
-  lua_assert(irt_isstr(irs->t));
+  lj_assertA(irt_isstr(irs->t),
+	     "BUFPUT of non-string IR %04d", ir->op2 - REF_BIAS);
   if (irs->o == IR_KGC) {
     GCstr *s = ir_kstr(irs);
     if (s->len == 1) {  /* Optimize put of single-char string constant. */
@@ -1002,7 +1026,8 @@ static void asm_bufput(ASMState *as, IRIns *ir)
 	args[1] = ASMREF_TMP1;  /* TValue * */
 	ci = &lj_ir_callinfo[IRCALL_lj_strfmt_putnum];
       } else {
-	lua_assert(irt_isinteger(IR(irs->op1)->t));
+	lj_assertA(irt_isinteger(IR(irs->op1)->t),
+		   "TOSTR of non-numeric IR %04d", irs->op1);
 	args[1] = irs->op1;  /* int */
 	if (irs->op2 == IRTOSTR_INT)
 	  ci = &lj_ir_callinfo[IRCALL_lj_strfmt_putint];
@@ -1090,15 +1115,16 @@ static void asm_collectargs(ASMState *as, IRIns *ir,
 			    const CCallInfo *ci, IRRef *args)
 {
   uint32_t n = CCI_XNARGS(ci);
-  lua_assert(n <= CCI_NARGS_MAX*2);  /* Account for split args. */
+  /* Account for split args. */
+  lj_assertA(n <= CCI_NARGS_MAX*2, "too many args %d to collect", n);
   if ((ci->flags & CCI_L)) { *args++ = ASMREF_L; n--; }
   while (n-- > 1) {
     ir = IR(ir->op1);
-    lua_assert(ir->o == IR_CARG);
+    lj_assertA(ir->o == IR_CARG, "malformed CALL arg tree");
     args[n] = ir->op2 == REF_NIL ? 0 : ir->op2;
   }
   args[0] = ir->op1 == REF_NIL ? 0 : ir->op1;
-  lua_assert(IR(ir->op1)->o != IR_CARG);
+  lj_assertA(IR(ir->op1)->o != IR_CARG, "malformed CALL arg tree");
 }
 
 /* Reconstruct CCallInfo flags for CALLX*. */
@@ -1438,7 +1464,10 @@ static void asm_ir(ASMState *as, IRIns *ir)
   switch ((IROp)ir->o) {
   /* Miscellaneous ops. */
   case IR_LOOP: asm_loop(as); break;
-  case IR_NOP: case IR_XBAR: lua_assert(!ra_used(ir)); break;
+  case IR_NOP: case IR_XBAR:
+    lj_assertA(!ra_used(ir),
+	       "IR %04d not unused", (int)(ir - as->ir) - REF_BIAS);
+    break;
   case IR_USE:
     ra_alloc1(as, ir->op1, irt_isfp(ir->t) ? RSET_FPR : RSET_GPR); break;
   case IR_PHI: asm_phi(as, ir); break;
@@ -1592,8 +1621,10 @@ static void asm_head_side(ASMState *as)
   for (i = as->stopins; i > REF_BASE; i--) {
     IRIns *ir = IR(i);
     RegSP rs;
-    lua_assert((ir->o == IR_SLOAD && (ir->op2 & IRSLOAD_PARENT)) ||
-	       (LJ_SOFTFP && ir->o == IR_HIOP) || ir->o == IR_PVAL);
+    lj_assertA((ir->o == IR_SLOAD && (ir->op2 & IRSLOAD_PARENT)) ||
+	       (LJ_SOFTFP && ir->o == IR_HIOP) || ir->o == IR_PVAL,
+	       "IR %04d has bad parent op %d",
+	       (int)(ir - as->ir) - REF_BIAS, ir->o);
     rs = as->parentmap[i - REF_FIRST];
     if (ra_hasreg(ir->r)) {
       rset_clear(allow, ir->r);
@@ -1834,7 +1865,7 @@ static void asm_setup_regsp(ASMState *as)
   ir = IR(REF_FIRST);
   if (as->parent) {
     uint16_t *p;
-    lastir = lj_snap_regspmap(as->parent, as->J->exitno, ir);
+    lastir = lj_snap_regspmap(as->J, as->parent, as->J->exitno, ir);
     if (lastir - ir > LJ_MAX_JSLOTS)
       lj_trace_err(as->J, LJ_TRERR_NYICOAL);
     as->stopins = (IRRef)((lastir-1) - as->ir);
@@ -2080,7 +2111,7 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
       RA_DBG_REF();
       checkmclim(as);
       asm_ir(as, ir);
-      lua_assert(as->curins-REF_BIAS < J->curfinal->nszirmcode);
+      lj_assertA(as->curins-REF_BIAS < J->curfinal->nszirmcode, "ir/mcode overflow");
       J->curfinal->szirmcode[as->curins-REF_BIAS] = (uint16_t)(end - as->mcp);
     }
 
@@ -2106,7 +2137,7 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     asm_phi_fixup(as);
 
     if (J->curfinal->nins >= T->nins) {  /* IR didn't grow? */
-      lua_assert(J->curfinal->nk == T->nk);
+      lj_assertA(J->curfinal->nk == T->nk, "unexpected IR constant growth");
       memcpy(J->curfinal->ir + as->orignins, T->ir + as->orignins,
 	     (T->nins - as->orignins) * sizeof(IRIns));  /* Copy RENAMEs. */
       T->nins = J->curfinal->nins;
@@ -2119,7 +2150,7 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     lj_trace_free(J2G(J), J->curfinal);
     J->curfinal = NULL;  /* In case lj_trace_alloc() OOMs. */
     J->curfinal = lj_trace_alloc(J->L, T);
-    lua_assert(J->curfinal->nszirmcode);
+    lj_assertA(J->curfinal->nszirmcode, "failed to allocate space for ir/mcode");
     as->realign = NULL;
   }
 

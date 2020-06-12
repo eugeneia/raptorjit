@@ -398,7 +398,7 @@ static LJ_AINLINE IRType itype2irt(const TValue *tv)
 
 static LJ_AINLINE uint32_t irt_toitype_(IRType t)
 {
-  lua_assert(t <= IRT_NUM);
+  lj_assertX(t <= IRT_NUM, "no plain type tag for IR type %d", t);
   return ~(uint32_t)t;
 }
 

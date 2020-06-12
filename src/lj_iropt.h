@@ -12,7 +12,6 @@
 #include "lj_jit.h"
 
 /* IR emitter. */
-LJ_FUNC void lj_ir_growtop(jit_State *J);
 LJ_FUNC TRef lj_ir_emit(jit_State *J);
 
 /* Save current IR in J->fold.ins, but do not emit it (yet). */

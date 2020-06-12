@@ -584,6 +584,11 @@ struct lua_State {
 #define curr_topL(L)		(L->base + curr_proto(L)->framesize)
 #define curr_top(L)		(curr_funcisL(L) ? curr_topL(L) : L->top)
 
+#if defined(LUA_USE_ASSERT) || defined(LUA_USE_APICHECK)
+LJ_FUNC_NORET void lj_assert_fail(global_State *g, const char *file, int line,
+				  const char *func, const char *fmt, ...);
+#endif
+
 /* -- GC object definition and conversions -------------------------------- */
 
 /* GC header for generic access to common fields of GC objects. */
@@ -637,10 +642,6 @@ typedef union GCobj {
 
 /* -- TValue getters/setters ---------------------------------------------- */
 
-#ifdef LUA_USE_ASSERT
-#include "lj_gc.h"
-#endif
-
 /* Macros to test types. */
 #define itype(o)	((uint32_t)((o)->it64 >> 47))
 #define tvisnil(o)	((o)->it64 == -1)
@@ -688,7 +689,6 @@ typedef union GCobj {
 #define tabV(o)		check_exp(tvistab(o), &gcval(o)->tab)
 #define udataV(o)	check_exp(tvisudata(o), &gcval(o)->ud)
 #define numV(o)		check_exp(tvisnum(o), (o)->n)
-#define intV(o)		check_exp(tvisint(o), (int32_t)(o)->i)
 
 /* Macros to set tagged values. */
 #define setitype(o, i)		((o)->it = ((i) << 15))
@@ -707,9 +707,19 @@ static LJ_AINLINE void setlightudV(TValue *o, void *p)
 #define contptr(f)		((void *)(f))
 #define setcont(o, f)		((o)->u64 = (uint64_t)(uintptr_t)contptr(f))
 
-#define tvchecklive(L, o) \
-  UNUSED(L), lua_assert(!tvisgcv(o) || \
-  ((~itype(o) == gcval(o)->gch.gct) && !isdead(G(L), gcval(o))))
+static LJ_AINLINE void checklivetv(lua_State *L, TValue *o, const char *msg)
+{
+  UNUSED(L); UNUSED(o); UNUSED(msg);
+#if LUA_USE_ASSERT
+  if (tvisgcv(o)) {
+    lj_assertL(~itype(o) == gcval(o)->gch.gct,
+	       "mismatch of TValue type %d vs GC type %d",
+	       ~itype(o), gcval(o)->gch.gct);
+    /* Copy of isdead check from lj_gc.h to avoid circular include. */
+    lj_assertL(!(gcval(o)->gch.marked & (G(L)->gc.currentwhite ^ 3) & 3), msg);
+  }
+#endif
+}
 
 static LJ_AINLINE void setgcVraw(TValue *o, GCobj *v, uint32_t itype)
 {
@@ -718,7 +728,8 @@ static LJ_AINLINE void setgcVraw(TValue *o, GCobj *v, uint32_t itype)
 
 static LJ_AINLINE void setgcV(lua_State *L, TValue *o, GCobj *v, uint32_t it)
 {
-  setgcVraw(o, v, it); tvchecklive(L, o);
+  setgcVraw(o, v, it);
+  checklivetv(L, o, "store to dead GC object");
 }
 
 #define define_setV(name, type, tag) \
@@ -754,7 +765,8 @@ static LJ_AINLINE void setint64V(TValue *o, int64_t i)
 /* Copy tagged values. */
 static LJ_AINLINE void copyTV(lua_State *L, TValue *o1, const TValue *o2)
 {
-  *o1 = *o2; tvchecklive(L, o1);
+  *o1 = *o2;
+  checklivetv(L, o1, "copy of dead GC object");
 }
 
 /* -- Number to integer conversion ---------------------------------------- */
