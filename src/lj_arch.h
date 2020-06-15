@@ -8,6 +8,8 @@
 
 #include "lua.h"
 
+/* -- Target definitions -------------------------------------------------- */
+
 /* Target endianess. */
 #define LUAJIT_LE	0
 #define LUAJIT_BE	1
@@ -38,6 +40,14 @@
 #define LUAJIT_OS_BSD		4
 #define LUAJIT_OS_POSIX		5
 
+/* Number mode. */
+#define LJ_NUMMODE_SINGLE	0	/* Single-number mode only. */
+#define LJ_NUMMODE_SINGLE_DUAL	1	/* Default to single-number mode. */
+#define LJ_NUMMODE_DUAL		2	/* Dual-number mode only. */
+#define LJ_NUMMODE_DUAL_SINGLE	3	/* Default to dual-number mode. */
+
+/* -- Target detection ---------------------------------------------------- */
+
 /* Select native target if no target defined. */
 
 /* Select native OS if no target OS defined. */
@@ -48,6 +58,7 @@
 #define LJ_TARGET_WINDOWS	(LUAJIT_OS == LUAJIT_OS_WINDOWS)
 #define LJ_TARGET_LINUX		(LUAJIT_OS == LUAJIT_OS_LINUX)
 #define LJ_TARGET_OSX		(LUAJIT_OS == LUAJIT_OS_OSX)
+#define LJ_TARGET_BSD		(LUAJIT_OS == LUAJIT_OS_BSD)
 #define LJ_TARGET_IOS		(LJ_TARGET_OSX && (LUAJIT_TARGET == LUAJIT_ARCH_ARM || LUAJIT_TARGET == LUAJIT_ARCH_ARM64))
 #define LJ_TARGET_POSIX		(LUAJIT_OS > LUAJIT_OS_WINDOWS)
 #define LJ_TARGET_DLOPEN	LJ_TARGET_POSIX
@@ -73,9 +84,7 @@
 #define LJ_TARGET_GC64		1
 
 
-#ifndef LJ_PAGESIZE
-#define LJ_PAGESIZE		4096
-#endif
+/* -- Checks for requirements --------------------------------------------- */
 
 /* Check for minimum required compiler versions. */
 #if defined(__GNUC__)
@@ -117,6 +126,10 @@
 
 #ifndef LJ_TARGET_UNALIGNED
 #define LJ_TARGET_UNALIGNED	0
+#endif
+
+#ifndef LJ_PAGESIZE
+#define LJ_PAGESIZE		4096
 #endif
 
 /* Compatibility with Lua 5.1 vs. 5.2. */
