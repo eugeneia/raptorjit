@@ -23,6 +23,7 @@
 #include "lj_trace.h"
 #include "lj_dispatch.h"
 #include "lj_vm.h"
+#include "lj_prng.h"
 #include "lj_lex.h"
 #include "luajit.h"
 
@@ -182,12 +183,20 @@ static void close_state(lua_State *L)
 
 LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
 {
+  PRNGState prng;
+  if (!lj_prng_seed_secure(&prng)) {
+    lj_assertX(0, "secure PRNG seeding failed");
+    /* Can only return NULL here, so this errors with "not enough memory". */
+    return NULL;
+  }
   GG_State *GG = (GG_State *)f(ud, NULL, 0, sizeof(GG_State));
   lua_State *L = &GG->L;
   global_State *g = &GG->g;
   jit_State *J = &GG->J;
   if (GG == NULL || !checkptrGC(GG)) return NULL;
   memset(GG, 0, sizeof(GG_State));
+  L = &GG->L;
+  g = &GG->g;
   L->gct = ~LJ_TTHREAD;
   L->marked = LJ_GC_WHITE0 | LJ_GC_FIXED | LJ_GC_SFIXED;  /* Prevent free. */
   L->dummy_ffid = FF_C;
@@ -197,6 +206,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc f, void *ud)
   g->strempty.gct = ~LJ_TSTR;
   g->allocf = f;
   g->allocd = ud;
+  g->prng = prng;
   setgcref(g->mainthref, obj2gco(L));
   setgcref(g->uvhead.prev, obj2gco(&g->uvhead));
   setgcref(g->uvhead.next, obj2gco(&g->uvhead));

@@ -235,4 +235,9 @@ static LJ_AINLINE uint32_t lj_getu32(const void *p)
   extern void LJ_ASSERT_NAME(__LINE__)(int STATIC_ASSERTION_FAILED[(cond)?1:-1])
 #endif
 
+/* PRNG state. Need this here, details in lj_prng.h. */
+typedef struct PRNGState {
+  uint64_t u[4];
+} PRNGState;
+
 #endif
