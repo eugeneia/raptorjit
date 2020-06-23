@@ -114,6 +114,18 @@ LJLIB_CF(jit_status)
   return (int)(L->top - L->base);
 }
 
+LJLIB_CF(jit_security)
+{
+  int idx = lj_lib_checkopt(L, 1, -1, LJ_SECURITY_MODESTRING);
+  setintV(L->top++, ((LJ_SECURITY_MODE >> (2*idx)) & 3));
+  return 1;
+}
+
+LJLIB_CF(jit_attach)
+{
+  return 0;
+}
+
 /* Calling this forces a trace stitch. */
 LJLIB_CF(jit_tracebarrier)
 {
