@@ -88,7 +88,7 @@ typedef uintptr_t BloomFilter;
 #define bloomset(b, x)	((b) |= bloombit((x)))
 #define bloomtest(b, x)	((b) & bloombit((x)))
 
-#if defined(__GNUC__) || defined(__psp2__)
+#if defined(__GNUC__) || defined(__clang__) || defined(__psp2__)
 
 #define LJ_NORET	__attribute__((noreturn))
 #define LJ_ALIGN(n)	__attribute__((aligned(n)))
@@ -119,7 +119,7 @@ static LJ_AINLINE uint32_t lj_fls(uint32_t x)
 #define lj_fls(x)	((uint32_t)(__builtin_clz(x)^31))
 #endif
 
-#if   (__GNUC__ > 4) || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3)
+#if   (__GNUC__ > 4) || (__GNUC__ == 4 && __GNUC_MINOR__ >= 3) || __clang__
 static LJ_AINLINE uint32_t lj_bswap(uint32_t x)
 {
   return (uint32_t)__builtin_bswap32((int32_t)x);

@@ -31,7 +31,7 @@ void lj_mcode_sync(void *start, void *end)
 #ifdef LUAJIT_USE_VALGRIND
   VALGRIND_DISCARD_TRANSLATIONS(start, (char *)end-(char *)start);
 #endif
-  UNUSED(start); UNUSED(end);
+  __clear_cache(start, end);
 }
 
 
