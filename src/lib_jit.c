@@ -253,7 +253,7 @@ LJLIB_CF(jit_vmprofile_open)
 LJLIB_CF(jit_vmprofile_close)
 {
   if (L->base < L->top && tvislightud(L->base)) {
-    return luaJIT_vmprofile_close(L, lightudV(L->base));
+    return luaJIT_vmprofile_close(L, lightudV(G(L), L->base));
   } else {
     lj_err_argtype(L, 1, "vmprofile");
   }
@@ -262,7 +262,7 @@ LJLIB_CF(jit_vmprofile_close)
 LJLIB_CF(jit_vmprofile_select)
 {
   if (L->base < L->top && tvislightud(L->base)) {
-    return luaJIT_vmprofile_select(L, lightudV(L->base));
+    return luaJIT_vmprofile_select(L, lightudV(G(L), L->base));
   } else {
     lj_err_argtype(L, 1, "vmprofile");
   }

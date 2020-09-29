@@ -175,6 +175,10 @@ static void close_state(lua_State *L)
   lj_mem_free(g, J->snapbuf, sizeof(SnapShot)*65536);
   lj_mem_free(g, J->irbuf, 65536*sizeof(IRIns));
   lj_mem_free(g, J->trace, TRACE_MAX * sizeof(GCRef *));
+  if (mref(g->gc.lightudseg, uint32_t)) {
+    MSize segnum = g->gc.lightudnum ? (2 << lj_fls(g->gc.lightudnum)) : 2;
+    lj_mem_freevec(g, mref(g->gc.lightudseg, uint32_t), segnum, uint32_t);
+  }
   lj_assertG(g->gc.total == sizeof(GG_State),
 	     "memory leak of %lld bytes",
 	     (long long)(g->gc.total - sizeof(GG_State)));
