@@ -1,5 +1,5 @@
 /*
-** LuaJIT -- a Just-In-Time Compiler for Lua. http://luajit.org/
+** LuaJIT -- a Just-In-Time Compiler for Lua. https://luajit.org/
 **
 ** Copyright (C) 2005-2020 Mike Pall. All rights reserved.
 **
@@ -22,7 +22,7 @@
 ** TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 ** SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 **
-** [ MIT license: http://www.opensource.org/licenses/mit-license.php ]
+** [ MIT license: https://www.opensource.org/licenses/mit-license.php ]
 */
 
 #ifndef _LUAJIT_H
