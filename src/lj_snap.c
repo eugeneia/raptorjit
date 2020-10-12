@@ -85,6 +85,9 @@ static MSize snapshot_framelinks(jit_State *J, SnapEntry *map, uint8_t *topslot)
   uint64_t pcbase = (u64ptr(J->pc) << 8) | (J->baseslot - 2);
   lj_assertJ(2 <= J->baseslot && J->baseslot <= 257, "bad baseslot");
   memcpy(map, &pcbase, sizeof(uint64_t));
+  lj_assertJ(!J->pt ||
+	     (J->pc >= proto_bc(J->pt) &&
+	      J->pc < proto_bc(J->pt) + J->pt->sizebc), "bad snapshot PC");
   while (frame > lim) {  /* Backwards traversal of all frames above base. */
     if (frame_islua(frame)) {
       frame = frame_prevl(frame);
