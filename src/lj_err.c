@@ -127,7 +127,6 @@ LJ_NOINLINE void lj_err_throw(lua_State *L, int errcode)
 {
   global_State *g = G(L);
   lj_trace_abort(g);
-  setmref(g->jit_base, NULL);
   L->status = LUA_OK;
   {
     void *cf = err_unwind(L, NULL, errcode);
