@@ -121,6 +121,7 @@ typedef uint8_t MCode;
 typedef struct SnapShot {
   uint32_t mapofs;	/* Offset into snapshot map. */
   IRRef1 ref;		/* First IR ref for this snapshot. */
+  uint16_t mcofs;	/* Offset into machine code in MCode units. */
   uint8_t nslots;	/* Number of valid slots. */
   uint8_t topslot;	/* Maximum frame extent. */
   uint8_t nent;		/* Number of compressed entries. */
@@ -391,6 +392,7 @@ typedef struct jit_State {
   const BCIns *startpc;	/* Bytecode PC of starting instruction. */
   TraceNo parent;	/* Parent of current side trace (0 for root traces). */
   ExitNo exitno;	/* Exit number in parent of current side trace. */
+  int exitcode;		/* Exit code from unwound trace. */
 
   BCIns *patchpc;	/* PC for pending re-patch. */
   BCIns patchins;	/* Instruction for pending re-patch. */

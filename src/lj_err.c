@@ -207,7 +207,7 @@ static ptrdiff_t finderrfunc(lua_State *L)
 /* Runtime error. */
 LJ_NOINLINE void lj_err_run(lua_State *L)
 {
-  ptrdiff_t ef = finderrfunc(L);
+  ptrdiff_t ef = tvref(G(L)->jit_base) ? 0 : finderrfunc(L);
   if (ef) {
     TValue *errfunc = restorestack(L, ef);
     TValue *top = L->top;
@@ -224,6 +224,14 @@ LJ_NOINLINE void lj_err_run(lua_State *L)
     lj_vm_call(L, top, 1+1);  /* Stack: |errfunc|msg| -> |msg| */
   }
   lj_err_throw(L, LUA_ERRRUN);
+}
+
+LJ_NOINLINE void lj_err_trace(lua_State *L, int errcode)
+{
+  if (errcode == LUA_ERRRUN)
+    lj_err_run(L);
+  else
+    lj_err_throw(L, errcode);
 }
 
 /* Formatted runtime error message. */

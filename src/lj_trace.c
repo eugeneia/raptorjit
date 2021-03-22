@@ -721,17 +721,24 @@ static TValue *trace_exit_cp(lua_State *L, lua_CFunction dummy, void *ud)
   return NULL;
 }
 
-
 /* A trace exited. Restore interpreter state. */
 int lj_trace_exit(jit_State *J, void *exptr)
 {
   ERRNO_SAVE
   lua_State *L = J->L;
   ExitDataCP exd;
-  int errcode;
+  int errcode, exitcode = J->exitcode;
+  TValue exiterr;
   const BCIns *pc;
   void *cf;
   GCtrace *T;
+
+  setnilV(&exiterr);
+  if (exitcode) {  /* Trace unwound with error code. */
+    J->exitcode = 0;
+    copyTV(L, &exiterr, L->top-1);
+  }
+
   T = traceref(J, J->parent); UNUSED(T);
 #ifdef EXITSTATE_CHECKEXIT
   if (J->exitno == T->nsnap) {  /* Treat stack check like a parent exit. */
@@ -748,10 +755,14 @@ int lj_trace_exit(jit_State *J, void *exptr)
   if (errcode)
     return -errcode;  /* Return negated error code. */
 
+  if (exitcode) copyTV(L, L->top++, &exiterr);  /* Anchor the error object. */
+
   pc = exd.pc;
   cf = cframe_raw(L->cframe);
   setcframe_pc(cf, pc);
-  if (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize) {
+  if (exitcode) {
+    return -exitcode;
+  } else if (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize) {
     if (!(G(L)->hookmask & HOOK_GC))
       lj_gc_step(L);  /* Exited because of GC: drive GC forward. */
   } else {
