@@ -22,7 +22,7 @@
 
 #include "lj_err.h"
 #include "lj_obj.h"
-#include "lj_api.h"
+#include "lj_udata.h"
 #include "lj_dispatch.h"
 #include "lj_jit.h"
 #include "lj_trace.h"
@@ -158,7 +158,7 @@ LUA_API int luaJIT_vmprofile_open(lua_State *L, const char *str, int noselect, i
 {
   void *ptr;
   if ((ptr = vmprofile_open_file(str)) != NULL) {
-    setrawlightudV(L->base, lightud_intern(L, ptr));
+    setrawlightudV(L->base, lj_lightud_intern(L, ptr));
     if (!noselect) vmprofile_set_profile(ptr);
     if (!nostart) vmprofile_start(L);
   } else {
@@ -175,7 +175,7 @@ LUA_API int luaJIT_vmprofile_close(lua_State *L, void *ud)
 
 LUA_API int luaJIT_vmprofile_select(lua_State *L, void *ud)
 {
-  setrawlightudV(L->base, lightud_intern(L, profile));
+  setrawlightudV(L->base, lj_lightud_intern(L, profile));
   vmprofile_set_profile(ud);
   return 1;
 }
