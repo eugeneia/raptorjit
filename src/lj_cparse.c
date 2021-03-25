@@ -1092,14 +1092,6 @@ static void cp_decl_gccattribute(CPState *cp, CPDecl *decl)
 		"\006packed" "\012__packed__"
 		"\004mode" "\010__mode__"
 		"\013vector_size" "\017__vector_size__"
-#if LJ_TARGET_X86
-		"\007regparm" "\013__regparm__"
-		"\005cdecl"  "\011__cdecl__"
-		"\010thiscall" "\014__thiscall__"
-		"\010fastcall" "\014__fastcall__"
-		"\007stdcall" "\013__stdcall__"
-		"\012sseregparm" "\016__sseregparm__"
-#endif
 	      )) {
       case 0: case 1: /* aligned */
 	cp_decl_align(cp, decl);
