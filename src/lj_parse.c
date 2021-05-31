@@ -1397,7 +1397,7 @@ static size_t fs_prep_var(LexState *ls, FuncState *fs, size_t *ofsvar,
     MSize len = s->len+1;
     char *p = lj_buf_more(&ls->sb, len);
     p = lj_buf_wmem(p, strdata(s), len);
-    setsbufP(&ls->sb, p);
+    ls->sb.w = p;
   }
   *ofsvar = sbuflen(&ls->sb);
   lastpc = 0;
@@ -1418,7 +1418,7 @@ static size_t fs_prep_var(LexState *ls, FuncState *fs, size_t *ofsvar,
       startpc = vs->startpc;
       p = lj_strfmt_wuleb128(p, startpc-lastpc);
       p = lj_strfmt_wuleb128(p, vs->endpc-startpc);
-      setsbufP(&ls->sb, p);
+      ls->sb.w = p;
       lastpc = startpc;
     }
   }
@@ -1430,7 +1430,7 @@ static size_t fs_prep_var(LexState *ls, FuncState *fs, size_t *ofsvar,
     int len = strlen(declname) + 1;
     p = lj_buf_more(&ls->sb, len);
     p = lj_buf_wmem(p, declname, len);
-    setsbufP(&ls->sb, p);
+    ls->sb.w = p;
   }
   return sbuflen(&ls->sb);
 }
@@ -1441,7 +1441,7 @@ static void fs_fixup_var(LexState *ls, GCproto *pt, uint8_t *p, size_t ofsvar, s
   setmref(pt->uvinfo, p);
   setmref(pt->varinfo, (char *)p + ofsvar);
   setmref(pt->declname, (char*)p + ofsdeclname);
-  memcpy(p, sbufB(&ls->sb), sbuflen(&ls->sb));  /* Copy from temp. buffer. */
+  memcpy(p, ls->sb.b, sbuflen(&ls->sb));  /* Copy from temp. buffer. */
 }
 
 /* Check if bytecode op returns. */
