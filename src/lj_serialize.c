@@ -55,11 +55,11 @@ LJ_STATIC_ASSERT((SER_TAG_TAB & 7) == 0);
 
 /* -- Helper functions ---------------------------------------------------- */
 
-static LJ_AINLINE char *serialize_more(char *w, StrBuf *sbuf, MSize sz)
+static LJ_AINLINE char *serialize_more(char *w, SBufExt *sbx, MSize sz)
 {
-  if (LJ_UNLIKELY(sz > (MSize)(sbuf->sb->e - w))) {
-    sbuf->sb->w = w;
-    w = lj_buf_more2(sbuf->sb, sz);
+  if (LJ_UNLIKELY(sz > (MSize)(sbx->e - w))) {
+    sbx->w = w;
+    w = lj_buf_more2((SBuf *)sbx, sz);
   }
   return w;
 }
@@ -87,27 +87,27 @@ static LJ_AINLINE char *serialize_wu124(char *w, uint32_t v)
   }
 }
 
-static LJ_NOINLINE char *serialize_ru124_(char *r, char *e, uint32_t *pv)
+static LJ_NOINLINE char *serialize_ru124_(char *r, char *w, uint32_t *pv)
 {
   uint32_t v = *pv;
   if (v != 0xff) {
-    if (r >= e) return NULL;
+    if (r >= w) return NULL;
     v = ((v & 0x1f) << 8) + *(uint8_t *)r + 0xe0; r++;
   } else {
-    if (r + 4 > e) return NULL;
+    if (r + 4 > w) return NULL;
     v = lj_getu32(r); r += 4;
   }
   *pv = v;
   return r;
 }
 
-static LJ_AINLINE char *serialize_ru124(char *r, char *e, uint32_t *pv)
+static LJ_AINLINE char *serialize_ru124(char *r, char *w, uint32_t *pv)
 {
-  if (LJ_LIKELY(r < e)) {
+  if (LJ_LIKELY(r < w)) {
     uint32_t v = *(uint8_t *)r; r++;
     *pv = v;
     if (LJ_UNLIKELY(v >= 0xe0)) {
-      r = serialize_ru124_(r, e, pv);
+      r = serialize_ru124_(r, w, pv);
     }
     return r;
   }
@@ -117,26 +117,26 @@ static LJ_AINLINE char *serialize_ru124(char *r, char *e, uint32_t *pv)
 /* -- Internal serializer ------------------------------------------------- */
 
 /* Put serialized object into buffer. */
-static char *serialize_put(char *w, StrBuf *sbuf, cTValue *o)
+static char *serialize_put(char *w, SBufExt *sbx, cTValue *o)
 {
   if (LJ_LIKELY(tvisstr(o))) {
     const GCstr *str = strV(o);
     MSize len = str->len;
-    w = serialize_more(w, sbuf, 5+len);
+    w = serialize_more(w, sbx, 5+len);
     w = serialize_wu124(w, SER_TAG_STR + len);
     w = lj_buf_wmem(w, strdata(str), len);
   } else if (tvisnum(o)) {
     uint64_t x = o->u64;
-    w = serialize_more(w, sbuf, 1+sizeof(lua_Number));
+    w = serialize_more(w, sbx, 1+sizeof(lua_Number));
     *w++ = SER_TAG_NUM; memcpy(w, &x, 8); w += 8;
   } else if (tvispri(o)) {
-    w = serialize_more(w, sbuf, 1);
+    w = serialize_more(w, sbx, 1);
     *w++ = (char)(SER_TAG_NIL + ~itype(o));
   } else if (tvistab(o)) {
     const GCtab *t = tabV(o);
     uint32_t narray = 0, nhash = 0, one = 2;
-    if (sbuf->depth <= 0) lj_err_caller(sbufL(sbuf->sb), LJ_ERR_BUFFER_DEPTH);
-    sbuf->depth--;
+    if (sbx->depth <= 0) lj_err_caller(sbufL(sbx), LJ_ERR_BUFFER_DEPTH);
+    sbx->depth--;
     if (t->asize > 0) {  /* Determine max. length of array part. */
       ptrdiff_t i;
       TValue *array = tvref(t->array);
@@ -153,37 +153,37 @@ static char *serialize_put(char *w, StrBuf *sbuf, cTValue *o)
 	nhash += !tvisnil(&node[i].val);
     }
     /* Write number of array slots and hash slots. */
-    w = serialize_more(w, sbuf, 1+2*5);
+    w = serialize_more(w, sbx, 1+2*5);
     *w++ = (char)(SER_TAG_TAB + (nhash ? 1 : 0) + (narray ? one : 0));
     if (narray) w = serialize_wu124(w, narray);
     if (nhash) w = serialize_wu124(w, nhash);
     if (narray) {  /* Write array entries. */
       cTValue *oa = tvref(t->array) + (one >> 2);
       cTValue *oe = tvref(t->array) + narray;
-      while (oa < oe) w = serialize_put(w, sbuf, oa++);
+      while (oa < oe) w = serialize_put(w, sbx, oa++);
     }
     if (nhash) {  /* Write hash entries. */
       const Node *node = noderef(t->node) + t->hmask;
       for (;; node--)
 	if (!tvisnil(&node->val)) {
-	  w = serialize_put(w, sbuf, &node->key);
-	  w = serialize_put(w, sbuf, &node->val);
+	  w = serialize_put(w, sbx, &node->key);
+	  w = serialize_put(w, sbx, &node->val);
 	  if (--nhash == 0) break;
 	}
     }
-    sbuf->depth++;
+    sbx->depth++;
 #if LJ_HASFFI
   } else if (tviscdata(o)) {
-    CTState *cts = ctype_cts(sbufL(sbuf->sb));
+    CTState *cts = ctype_cts(sbufL(sbx));
     CType *s = ctype_raw(cts, cdataV(o)->ctypeid);
     uint8_t *sp = cdataptr(cdataV(o));
     if (ctype_isinteger(s->info) && s->size == 8) {
-      w = serialize_more(w, sbuf, 1+8);
+      w = serialize_more(w, sbx, 1+8);
       *w++ = (s->info & CTF_UNSIGNED) ? SER_TAG_UINT64 : SER_TAG_INT64;
       memcpy(w, sp, 8);
       w += 8;
     } else if (ctype_iscomplex(s->info) && s->size == 16) {
-      w = serialize_more(w, sbuf, 1+16);
+      w = serialize_more(w, sbx, 1+16);
       *w++ = SER_TAG_COMPLEX;
       memcpy(w, sp, 16);
       w += 16;
@@ -192,8 +192,8 @@ static char *serialize_put(char *w, StrBuf *sbuf, cTValue *o)
     }
 #endif
   } else if (tvislightud(o)) {
-    uintptr_t ud = (uintptr_t)lightudV(G(sbufL(sbuf->sb)), o);
-    w = serialize_more(w, sbuf, 1+sizeof(ud));
+    uintptr_t ud = (uintptr_t)lightudV(G(sbufL(sbx)), o);
+    w = serialize_more(w, sbx, 1+sizeof(ud));
     if (ud == 0) {
       *w++ = SER_TAG_NULL;
     } else if (checku32(ud)) {
@@ -206,28 +206,28 @@ static char *serialize_put(char *w, StrBuf *sbuf, cTValue *o)
 #if LJ_HASFFI
   badenc:
 #endif
-    lj_err_callerv(sbufL(sbuf->sb), LJ_ERR_BUFFER_BADENC, lj_typename(o));
+    lj_err_callerv(sbufL(sbx), LJ_ERR_BUFFER_BADENC, lj_typename(o));
   }
   return w;
 }
 
 /* Get serialized object from buffer. */
-static char *serialize_get(char *r, StrBuf *sbuf, TValue *o)
+static char *serialize_get(char *r, SBufExt *sbx, TValue *o)
 {
-  char *e = sbuf->sb->e;
+  char *w = sbx->w;
   uint32_t tp;
-  r = serialize_ru124(r, e, &tp); if (LJ_UNLIKELY(!r)) goto eob;
+  r = serialize_ru124(r, w, &tp); if (LJ_UNLIKELY(!r)) goto eob;
   if (LJ_LIKELY(tp >= SER_TAG_STR)) {
     uint32_t len = tp - SER_TAG_STR;
-    if (LJ_UNLIKELY(len > (uint32_t)(e - r))) goto eob;
-    setstrV(sbufL(sbuf->sb), o, lj_str_new(sbufL(sbuf->sb), r, len));
+    if (LJ_UNLIKELY(len > (uint32_t)(w - r))) goto eob;
+    setstrV(sbufL(sbx), o, lj_str_new(sbufL(sbx), r, len));
     r += len;
   } else if (tp == SER_TAG_INT) {
-    if (LJ_UNLIKELY(r + 4 > e)) goto eob;
+    if (LJ_UNLIKELY(r + 4 > w)) goto eob;
     setintV(o, (int32_t)(lj_getu32(r)));
     r += 4;
   } else if (tp == SER_TAG_NUM) {
-    if (LJ_UNLIKELY(r + 8 > e)) goto eob;
+    if (LJ_UNLIKELY(r + 8 > w)) goto eob;
     memcpy(o, r, 8); r += 8;
     if (!tvisnum(o)) setnanV(o);
   } else if (tp <= SER_TAG_TRUE) {
@@ -236,75 +236,75 @@ static char *serialize_get(char *r, StrBuf *sbuf, TValue *o)
     uint32_t narray = 0, nhash = 0;
     GCtab *t;
     if (tp >= SER_TAG_TAB+2) {
-      r = serialize_ru124(r, e, &narray); if (LJ_UNLIKELY(!r)) goto eob;
+      r = serialize_ru124(r, w, &narray); if (LJ_UNLIKELY(!r)) goto eob;
     }
     if ((tp & 1)) {
-      r = serialize_ru124(r, e, &nhash); if (LJ_UNLIKELY(!r)) goto eob;
+      r = serialize_ru124(r, w, &nhash); if (LJ_UNLIKELY(!r)) goto eob;
     }
-    t = lj_tab_new(sbufL(sbuf->sb), narray, hsize2hbits(nhash));
-    settabV(sbufL(sbuf->sb), o, t);
+    t = lj_tab_new(sbufL(sbx), narray, hsize2hbits(nhash));
+    settabV(sbufL(sbx), o, t);
     if (narray) {
       TValue *oa = tvref(t->array) + (tp >= SER_TAG_TAB+4);
       TValue *oe = tvref(t->array) + narray;
-      while (oa < oe) r = serialize_get(r, sbuf, oa++);
+      while (oa < oe) r = serialize_get(r, sbx, oa++);
     }
     if (nhash) {
       do {
 	TValue k, *v;
-	r = serialize_get(r, sbuf, &k);
-	v = lj_tab_set(sbufL(sbuf->sb), t, &k);
+	r = serialize_get(r, sbx, &k);
+	v = lj_tab_set(sbufL(sbx), t, &k);
 	if (LJ_UNLIKELY(!tvisnil(v)))
-	  lj_err_caller(sbufL(sbuf->sb), LJ_ERR_BUFFER_DUPKEY);
-	r = serialize_get(r, sbuf, v);
+	  lj_err_caller(sbufL(sbx), LJ_ERR_BUFFER_DUPKEY);
+	r = serialize_get(r, sbx, v);
       } while (--nhash);
     }
 #if LJ_HASFFI
   } else if (tp >= SER_TAG_INT64 &&  tp <= SER_TAG_COMPLEX) {
     uint32_t sz = tp == SER_TAG_COMPLEX ? 16 : 8;
     GCcdata *cd;
-    if (LJ_UNLIKELY(r + sz > e)) goto eob;
-    cd = lj_cdata_new_(sbufL(sbuf->sb),
+    if (LJ_UNLIKELY(r + sz > w)) goto eob;
+    cd = lj_cdata_new_(sbufL(sbx),
 	   tp == SER_TAG_INT64 ? CTID_INT64 :
 	   tp == SER_TAG_UINT64 ? CTID_UINT64 : CTID_COMPLEX_DOUBLE,
 	   sz);
     memcpy(cdataptr(cd), r, sz); r += sz;
-    setcdataV(sbufL(sbuf->sb), o, cd);
+    setcdataV(sbufL(sbx), o, cd);
 #endif
   } else if (tp <= SER_TAG_LIGHTUD64) {
     uintptr_t ud = 0;
     if (tp == SER_TAG_LIGHTUD32) {
-      if (LJ_UNLIKELY(r + 4 > e)) goto eob;
+      if (LJ_UNLIKELY(r + 4 > w)) goto eob;
       ud = (uintptr_t)(lj_getu32(r));
       r += 4;
     }
     else if (tp == SER_TAG_LIGHTUD64) {
-      if (LJ_UNLIKELY(r + 8 > e)) goto eob;
+      if (LJ_UNLIKELY(r + 8 > w)) goto eob;
       memcpy(&ud, r, 8); r += 8;
     }
-    setrawlightudV(o, lj_lightud_intern(sbufL(sbuf->sb), (void *)ud));
+    setrawlightudV(o, lj_lightud_intern(sbufL(sbx), (void *)ud));
   } else {
-    lj_err_callerv(sbufL(sbuf->sb), LJ_ERR_BUFFER_BADDEC, tp);
+    lj_err_callerv(sbufL(sbx), LJ_ERR_BUFFER_BADDEC, tp);
   }
   return r;
 eob:
-  lj_err_caller(sbufL(sbuf->sb), LJ_ERR_BUFFER_EOB);
+  lj_err_caller(sbufL(sbx), LJ_ERR_BUFFER_EOB);
   return NULL;
 }
 
-StrBuf * lj_serialize_put(StrBuf *sbuf, cTValue *o)
+SBufExt * lj_serialize_put(SBufExt *sbx, cTValue *o)
 {
-  sbuf->depth = LJ_SERIALIZE_DEPTH;
-  sbuf->sb->w = serialize_put(sbuf->sb->w, sbuf, o);
-  return sbuf;
+  sbx->depth = LJ_SERIALIZE_DEPTH;
+  sbx->w = serialize_put(sbx->w, sbx, o);
+  return sbx;
 }
 
-StrBuf * lj_serialize_get(StrBuf *sbuf, TValue *o)
+SBufExt * lj_serialize_get(SBufExt *sbx, TValue *o)
 {
-  char *r = serialize_get(sbuf->r, sbuf, o);
-  if (r != sbuf->sb->w)
-    lj_err_caller(sbufL(sbuf->sb), LJ_ERR_BUFFER_LEFTOV);
-  sbuf->r = r;
-  return sbuf;
+  char *r = serialize_get(sbx->r, sbx, o);
+  if (r != sbx->w)
+    lj_err_caller(sbufL(sbx), LJ_ERR_BUFFER_LEFTOV);
+  sbx->r = r;
+  return sbx;
 }
 
 #endif

@@ -23,8 +23,10 @@ typedef uint64_t GCSize;
 typedef void * MRef;
 
 #define mref(r, t)	((t *)(r))
+#define mrefu(r)	((uint64_t)(r))
 
 #define setmref(r, p)	((r) = (void *)(p))
+#define setmrefu(r, p)	((r) = (void *)(uint64_t)(p))
 #define setmrefr(r, v)	((r) = (v))
 
 /* -- GC object references ------------------------------------------------ */
