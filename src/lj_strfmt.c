@@ -9,11 +9,14 @@
 #define LUA_CORE
 
 #include "lj_obj.h"
+#include "lj_err.h"
 #include "lj_buf.h"
 #include "lj_str.h"
+#include "lj_meta.h"
 #include "lj_state.h"
 #include "lj_char.h"
 #include "lj_strfmt.h"
+#include "lj_lib.h"
 
 /* -- Format parser ------------------------------------------------------- */
 
@@ -190,10 +193,8 @@ SBuf * lj_strfmt_putptr(SBuf *sb, const void *v)
 }
 
 /* Add quoted string to buffer. */
-SBuf * lj_strfmt_putquoted(SBuf *sb, GCstr *str)
+static SBuf *strfmt_putquotedlen(SBuf *sb, const char *s, MSize len)
 {
-  const char *s = strdata(str);
-  MSize len = str->len;
   lj_buf_putb(sb, '"');
   while (len--) {
     uint32_t c = (uint32_t)(uint8_t)*s++;
@@ -219,6 +220,11 @@ SBuf * lj_strfmt_putquoted(SBuf *sb, GCstr *str)
   return sb;
 }
 
+SBuf * lj_strfmt_putquoted(SBuf *sb, GCstr *str)
+{
+  return strfmt_putquotedlen(sb, strdata(str), str->len);
+}
+
 /* -- Formatted conversions to buffer ------------------------------------- */
 
 /* Add formatted char to buffer. */
@@ -234,16 +240,22 @@ SBuf *lj_strfmt_putfchar(SBuf *sb, SFormat sf, int32_t c)
 }
 
 /* Add formatted string to buffer. */
-SBuf *lj_strfmt_putfstr(SBuf *sb, SFormat sf, GCstr *str)
+static SBuf *strfmt_putfstrlen(SBuf *sb, SFormat sf, const char *s, MSize len)
 {
-  MSize len = str->len <= STRFMT_PREC(sf) ? str->len : STRFMT_PREC(sf);
   MSize width = STRFMT_WIDTH(sf);
-  char *w = lj_buf_more(sb, width > len ? width : len);
-  if ((sf & STRFMT_F_LEFT)) w = lj_buf_wmem(w, strdata(str), len);
+  char *w;
+  if (len > STRFMT_PREC(sf)) len = STRFMT_PREC(sf);
+  w = lj_buf_more(sb, width > len ? width : len);
+  if ((sf & STRFMT_F_LEFT)) w = lj_buf_wmem(w, s, len);
   while (width-- > len) *w++ = ' ';
-  if (!(sf & STRFMT_F_LEFT)) w = lj_buf_wmem(w, strdata(str), len);
+  if (!(sf & STRFMT_F_LEFT)) w = lj_buf_wmem(w, s, len);
   sb->w = w;
   return sb;
+}
+
+SBuf *lj_strfmt_putfstr(SBuf *sb, SFormat sf, GCstr *str)
+{
+  return strfmt_putfstrlen(sb, sf, strdata(str), str->len);
 }
 
 /* Add formatted signed/unsigned integer to buffer. */
@@ -338,6 +350,80 @@ SBuf *lj_strfmt_putfnum_uint(SBuf *sb, SFormat sf, lua_Number n)
   else
     k = (int64_t)n;
   return lj_strfmt_putfxint(sb, sf, (uint64_t)k);
+}
+
+/* Format stack arguments to buffer. */
+int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
+{
+  int narg = (int)(L->top - L->base);
+  GCstr *fmt = lj_lib_checkstr(L, arg);
+  FormatState fs;
+  SFormat sf;
+  lj_strfmt_init(&fs, strdata(fmt), fmt->len);
+  while ((sf = lj_strfmt_parse(&fs)) != STRFMT_EOF) {
+    if (sf == STRFMT_LIT) {
+      lj_buf_putmem(sb, fs.str, fs.len);
+    } else if (sf == STRFMT_ERR) {
+      lj_err_callerv(L, LJ_ERR_STRFMT,
+		     strdata(lj_str_new(L, fs.str, fs.len)));
+    } else {
+      TValue *o = &L->base[arg++];
+      if (arg > narg)
+	lj_err_arg(L, arg, LJ_ERR_NOVAL);
+      switch (STRFMT_TYPE(sf)) {
+      case STRFMT_INT:
+	lj_strfmt_putfnum_int(sb, sf, lj_lib_checknum(L, arg));
+	break;
+      case STRFMT_UINT:
+	lj_strfmt_putfnum_uint(sb, sf, lj_lib_checknum(L, arg));
+	break;
+      case STRFMT_NUM:
+	lj_strfmt_putfnum(sb, sf, lj_lib_checknum(L, arg));
+	break;
+      case STRFMT_STR: {
+	MSize len;
+	const char *s;
+	cTValue *mo;
+	if (LJ_UNLIKELY(!tvisstr(o)) && retry >= 0 &&
+	    !tvisnil(mo = lj_meta_lookup(L, o, MM_tostring))) {
+	  /* Call __tostring metamethod once. */
+	  copyTV(L, L->top++, mo);
+	  copyTV(L, L->top++, o);
+	  lua_call(L, 1, 1);
+	  o = &L->base[arg-1];  /* Stack may have been reallocated. */
+	  copyTV(L, o, --L->top);  /* Replace inline for retry. */
+	  if (retry < 2) {  /* Global buffer may have been overwritten. */
+	    retry = 1;
+	    break;
+	  }
+	}
+	if (LJ_LIKELY(tvisstr(o))) {
+	  len = strV(o)->len;
+	  s = strVdata(o);
+	} else {
+	  GCstr *str = lj_strfmt_obj(L, o);
+	  len = str->len;
+	  s = strdata(str);
+	}
+	if ((sf & STRFMT_T_QUOTED))
+	  strfmt_putquotedlen(sb, s, len);  /* No formatting. */
+	else
+	  strfmt_putfstrlen(sb, sf, s, len);
+	break;
+	}
+      case STRFMT_CHAR:
+	lj_strfmt_putfchar(sb, sf, lj_lib_checkint(L, arg));
+	break;
+      case STRFMT_PTR:  /* No formatting. */
+	lj_strfmt_putptr(sb, lj_obj_ptr(G(L), o));
+	break;
+      default:
+	lj_assertL(0, "bad string format type");
+	break;
+      }
+    }
+  }
+  return retry;
 }
 
 /* -- Conversions to strings ---------------------------------------------- */

@@ -102,6 +102,7 @@ LJ_FUNC SBuf *lj_strfmt_putfnum_uint(SBuf *sb, SFormat sf, lua_Number n);
 LJ_FUNC SBuf *lj_strfmt_putfnum(SBuf *sb, SFormat, lua_Number n);
 LJ_FUNC SBuf *lj_strfmt_putfchar(SBuf *sb, SFormat, int32_t c);
 LJ_FUNC SBuf *lj_strfmt_putfstr(SBuf *sb, SFormat, GCstr *str);
+LJ_FUNC int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry);
 
 /* Conversions to strings. */
 LJ_FUNC GCstr * lj_strfmt_int(lua_State *L, int32_t k);
