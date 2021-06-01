@@ -14,10 +14,8 @@
 #include "lj_str.h"
 #include "lj_tab.h"
 #include "lj_udata.h"
-#if LJ_HASFFI
 #include "lj_ctype.h"
 #include "lj_cdata.h"
-#endif
 #include "lj_serialize.h"
 
 /* Tags for internal serialization format. */
@@ -172,7 +170,6 @@ static char *serialize_put(char *w, SBufExt *sbx, cTValue *o)
 	}
     }
     sbx->depth++;
-#if LJ_HASFFI
   } else if (tviscdata(o)) {
     CTState *cts = ctype_cts(sbufL(sbx));
     CType *s = ctype_raw(cts, cdataV(o)->ctypeid);
@@ -190,7 +187,6 @@ static char *serialize_put(char *w, SBufExt *sbx, cTValue *o)
     } else {
       goto badenc;  /* NYI other cdata */
     }
-#endif
   } else if (tvislightud(o)) {
     uintptr_t ud = (uintptr_t)lightudV(G(sbufL(sbx)), o);
     w = serialize_more(w, sbx, 1+sizeof(ud));
@@ -203,9 +199,7 @@ static char *serialize_put(char *w, SBufExt *sbx, cTValue *o)
     }
   } else {
     /* NYI userdata */
-#if LJ_HASFFI
   badenc:
-#endif
     lj_err_callerv(sbufL(sbx), LJ_ERR_BUFFER_BADENC, lj_typename(o));
   }
   return w;
@@ -258,7 +252,6 @@ static char *serialize_get(char *r, SBufExt *sbx, TValue *o)
 	r = serialize_get(r, sbx, v);
       } while (--nhash);
     }
-#if LJ_HASFFI
   } else if (tp >= SER_TAG_INT64 &&  tp <= SER_TAG_COMPLEX) {
     uint32_t sz = tp == SER_TAG_COMPLEX ? 16 : 8;
     GCcdata *cd;
@@ -269,7 +262,6 @@ static char *serialize_get(char *r, SBufExt *sbx, TValue *o)
 	   sz);
     memcpy(cdataptr(cd), r, sz); r += sz;
     setcdataV(sbufL(sbx), o, cd);
-#endif
   } else if (tp <= SER_TAG_LIGHTUD64) {
     uintptr_t ud = 0;
     if (tp == SER_TAG_LIGHTUD32) {
@@ -300,10 +292,7 @@ SBufExt * lj_serialize_put(SBufExt *sbx, cTValue *o)
 
 SBufExt * lj_serialize_get(SBufExt *sbx, TValue *o)
 {
-  char *r = serialize_get(sbx->r, sbx, o);
-  if (r != sbx->w)
-    lj_err_caller(sbufL(sbx), LJ_ERR_BUFFER_LEFTOV);
-  sbx->r = r;
+  sbx->r = serialize_get(sbx->r, sbx, o);
   return sbx;
 }
 

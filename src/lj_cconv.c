@@ -7,6 +7,7 @@
 
 
 #include "lj_err.h"
+#include "lj_buf.h"
 #include "lj_tab.h"
 #include "lj_ctype.h"
 #include "lj_cdata.h"
@@ -596,6 +597,8 @@ void lj_cconv_ct_tv(CTState *cts, CType *d,
     tmpptr = uddata(ud);
     if (ud->udtype == UDTYPE_IO_FILE)
       tmpptr = *(void **)tmpptr;
+    else if (ud->udtype == UDTYPE_BUFFER)
+      tmpptr = ((SBufExt *)tmpptr)->r;
   } else if (tvislightud(o)) {
     tmpptr = lightudV(cts->g, o);
   } else if (tvisfunc(o)) {
