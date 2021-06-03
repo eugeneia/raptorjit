@@ -1033,9 +1033,10 @@ static void asm_bufhdr(ASMState *as, IRIns *ir)
     }
   } else {
     Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, sb));
-    /* Passing ir isn't strictly correct, but it's an IRT_PGC, too. */
-    emit_storeofs(as, ir, tmp, sb, offsetof(SBuf, w));
-    emit_loadofs(as, ir, tmp, sb, offsetof(SBuf, b));
+    IRIns irbp;
+    irbp.ot = IRT(0, IRT_PTR);  /* Buffer data pointer type. */
+    emit_storeofs(as, &irbp, tmp, sb, offsetof(SBuf, w));
+    emit_loadofs(as, &irbp, tmp, sb, offsetof(SBuf, b));
   }
   ra_left(as, sb, ir->op1);
 }
