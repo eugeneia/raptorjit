@@ -32,5 +32,6 @@ LJ_FUNC int recff_bit64_shift(jit_State *J, RecordFFData *rd);
 LJ_FUNC TRef recff_bit64_tohex(jit_State *J, RecordFFData *rd, TRef hdr);
 
 LJ_FUNC void lj_crecord_tonumber(jit_State *J, RecordFFData *rd);
+LJ_FUNC TRef lj_crecord_loadiu64(jit_State *J, TRef tr, cTValue *o);
 
 #endif

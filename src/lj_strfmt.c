@@ -16,6 +16,7 @@
 #include "lj_state.h"
 #include "lj_char.h"
 #include "lj_strfmt.h"
+#include "lj_ctype.h"
 #include "lj_lib.h"
 
 /* -- Format parser ------------------------------------------------------- */
@@ -376,9 +377,23 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	lj_err_arg(L, arg, LJ_ERR_NOVAL);
       switch (STRFMT_TYPE(sf)) {
       case STRFMT_INT:
+	if (tviscdata(o)) {
+	  GCcdata *cd = cdataV(o);
+	  if (cd->ctypeid == CTID_INT64 || cd->ctypeid == CTID_UINT64) {
+	    lj_strfmt_putfxint(sb, sf, *(uint64_t *)cdataptr(cd));
+	    break;
+	  }
+	}
 	lj_strfmt_putfnum_int(sb, sf, lj_lib_checknum(L, arg));
 	break;
       case STRFMT_UINT:
+	if (tviscdata(o)) {
+	  GCcdata *cd = cdataV(o);
+	  if (cd->ctypeid == CTID_INT64 || cd->ctypeid == CTID_UINT64) {
+	    lj_strfmt_putfxint(sb, sf, *(uint64_t *)cdataptr(cd));
+	    break;
+	  }
+	}
 	lj_strfmt_putfnum_uint(sb, sf, lj_lib_checknum(L, arg));
 	break;
       case STRFMT_NUM:
