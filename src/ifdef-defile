@@ -8,6 +8,7 @@
 #define LUAJIT_ENABLE_GC64 1
 #define LUAJIT_ENABLE_JIT 1
 #define LJ_64 1
+#define LJ_GC64 1
 #undef LJ_HASPROFILE
 #undef LJ_UNWIND_EXT
 #undef LUAJIT_DISABLE_FFI

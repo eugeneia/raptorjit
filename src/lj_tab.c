@@ -16,21 +16,6 @@
 
 /* -- Object hashing ------------------------------------------------------ */
 
-/* Hash values are masked with the table hash mask and used as an index. */
-static LJ_AINLINE Node *hashmask(const GCtab *t, uint32_t hash)
-{
-  Node *n = noderef(t->node);
-  return &n[hash & t->hmask];
-}
-
-/* String IDs are generated when a string is interned. */
-#define hashstr(t, s)		hashmask(t, (s)->sid)
-
-#define hashlohi(t, lo, hi)	hashmask((t), hashrot((lo), (hi)))
-#define hashnum(t, o)		hashlohi((t), (o)->u32.lo, ((o)->u32.hi << 1))
-#define hashgcref(t, r) \
-  hashlohi((t), (uint32_t)gcrefu(r), (uint32_t)(gcrefu(r) >> 32))
-
 /* Hash an arbitrary key and return its anchor position in the hash table. */
 static Node *hashkey(const GCtab *t, cTValue *key)
 {
@@ -397,7 +382,7 @@ cTValue * lj_tab_getinth(GCtab *t, int32_t key)
   return NULL;
 }
 
-cTValue *lj_tab_getstr(GCtab *t, GCstr *key)
+cTValue *lj_tab_getstr(GCtab *t, const GCstr *key)
 {
   Node *n = hashstr(t, key);
   do {
@@ -526,7 +511,7 @@ TValue *lj_tab_setinth(lua_State *L, GCtab *t, int32_t key)
   return lj_tab_newkey(L, t, &k);
 }
 
-TValue *lj_tab_setstr(lua_State *L, GCtab *t, GCstr *key)
+TValue *lj_tab_setstr(lua_State *L, GCtab *t, const GCstr *key)
 {
   TValue k;
   Node *n = hashstr(t, key);

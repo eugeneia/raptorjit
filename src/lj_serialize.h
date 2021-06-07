@@ -13,6 +13,7 @@
 
 #define LJ_SERIALIZE_DEPTH	100	/* Default depth. */
 
+LJ_FUNC void lj_serialize_dict_prep(lua_State *L, GCtab *dict);
 LJ_FUNC SBufExt * lj_serialize_put(SBufExt *sbx, cTValue *o);
 LJ_FUNC SBufExt * lj_serialize_get(SBufExt *sbx, TValue *o);
 
