@@ -106,15 +106,16 @@ enum {
 #define EMITFOLD	(lj_ir_emit(J))
 
 /* Load/store forwarding. */
-LJ_FUNC TRef  lj_opt_fwd_aload(jit_State *J);
-LJ_FUNC TRef  lj_opt_fwd_hload(jit_State *J);
-LJ_FUNC TRef  lj_opt_fwd_uload(jit_State *J);
-LJ_FUNC TRef  lj_opt_fwd_fload(jit_State *J);
-LJ_FUNC TRef  lj_opt_fwd_xload(jit_State *J);
-LJ_FUNC TRef  lj_opt_fwd_alen(jit_State *J);
-LJ_FUNC TRef  lj_opt_fwd_hrefk(jit_State *J);
-LJ_FUNC int  lj_opt_fwd_href_nokey(jit_State *J);
-LJ_FUNC int  lj_opt_fwd_tptr(jit_State *J, IRRef lim);
+LJ_FUNC TRef lj_opt_fwd_aload(jit_State *J);
+LJ_FUNC TRef lj_opt_fwd_hload(jit_State *J);
+LJ_FUNC TRef lj_opt_fwd_uload(jit_State *J);
+LJ_FUNC TRef lj_opt_fwd_fload(jit_State *J);
+LJ_FUNC TRef lj_opt_fwd_xload(jit_State *J);
+LJ_FUNC TRef lj_opt_fwd_alen(jit_State *J);
+LJ_FUNC TRef lj_opt_fwd_hrefk(jit_State *J);
+LJ_FUNC int lj_opt_fwd_href_nokey(jit_State *J);
+LJ_FUNC int lj_opt_fwd_tptr(jit_State *J, IRRef lim);
+LJ_FUNC int lj_opt_fwd_sbuf(jit_State *J, IRRef lim);
 LJ_FUNC int lj_opt_fwd_wasnonnil(jit_State *J, IROpT loadop, IRRef xref);
 
 /* Dead-store elimination. */

@@ -15,7 +15,10 @@
 
 LJ_FUNC void lj_serialize_dict_prep(lua_State *L, GCtab *dict);
 LJ_FUNC SBufExt * lj_serialize_put(SBufExt *sbx, cTValue *o);
-LJ_FUNC SBufExt * lj_serialize_get(SBufExt *sbx, TValue *o);
+LJ_FUNC char * lj_serialize_get(SBufExt *sbx, TValue *o);
+LJ_FUNC GCstr * lj_serialize_encode(lua_State *L, cTValue *o);
+LJ_FUNC void lj_serialize_decode(lua_State *L, TValue *o, GCstr *str);
+LJ_FUNC MSize lj_serialize_peektype(SBufExt *sbx);
 
 #endif
 
