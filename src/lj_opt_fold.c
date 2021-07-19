@@ -2330,6 +2330,7 @@ LJFOLD(XSTORE any any)
 LJFOLDX(lj_opt_dse_xstore)
 
 LJFOLD(NEWREF any any)  /* Treated like a store. */
+LJFOLD(TMPREF any any)
 LJFOLD(CALLA any any)
 LJFOLD(CALLL any any)  /* Safeguard fallback. */
 LJFOLD(CALLS any any)
