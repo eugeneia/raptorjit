@@ -1996,13 +1996,23 @@ static void asm_setup_regsp(ASMState *as)
       }
       /* fallthrough */ /* for integer POW */
     case IR_DIV: case IR_MOD:
-      if (!irt_isnum(ir->t)) {
+      if ((LJ_64 && LJ_SOFTFP) || !irt_isnum(ir->t)) {
 	ir->prev = REGSP_HINT(RID_RET);
 	if (inloop)
 	  as->modset |= (RSET_SCRATCH & RSET_GPR);
 	continue;
       }
       break;
+#if LJ_64 && LJ_SOFTFP
+    case IR_ADD: case IR_SUB: case IR_MUL:
+      if (irt_isnum(ir->t)) {
+	ir->prev = REGSP_HINT(RID_RET);
+	if (inloop)
+	  as->modset |= (RSET_SCRATCH & RSET_GPR);
+	continue;
+      }
+      break;
+#endif
     case IR_FPMATH:
       if (ir->op2 <= IRFPM_TRUNC) {
 	if (!(as->flags & JIT_F_SSE4_1)) {
