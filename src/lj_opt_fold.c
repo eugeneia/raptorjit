@@ -543,7 +543,11 @@ LJFOLDF(kfold_strcmp)
 ** fragments left over from CSE are eliminated by DCE.
 */
 
-/* BUFHDR is emitted like a store, see below. */
+LJFOLD(BUFHDR any any)
+LJFOLDF(bufhdr_merge)
+{
+  return fins->op2 == IRBUFHDR_WRITE ? CSEFOLD : EMITFOLD;
+}
 
 LJFOLD(BUFPUT BUFHDR BUFSTR)
 LJFOLDF(bufput_append)
@@ -2341,7 +2345,6 @@ LJFOLD(TNEW any any)
 LJFOLD(TDUP any)
 LJFOLD(CNEW any any)
 LJFOLD(XSNEW any any)
-LJFOLD(BUFHDR any any)
 LJFOLDX(lj_ir_emit)
 
 /* ------------------------------------------------------------------------ */
