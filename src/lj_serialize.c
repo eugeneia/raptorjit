@@ -313,13 +313,13 @@ static char *serialize_get(char *r, SBufExt *sbx, TValue *o)
   } else if (tp == SER_TAG_NUM) {
     if (LJ_UNLIKELY(r + 8 > w)) goto eob;
     memcpy(o, r, 8); r += 8;
-    if (!tvisnum(o)) setnanV(o);
+    if (!tvisnum(o)) setnanV(o);  /* Fix non-canonical NaNs. */
   } else if (tp <= SER_TAG_TRUE) {
     setpriV(o, ~tp);
   } else if (tp == SER_TAG_DICT_STR) {
     GCtab *dict_str;
     uint32_t idx;
-    r = serialize_ru124(r, w, &idx);
+    r = serialize_ru124(r, w, &idx); if (LJ_UNLIKELY(!r)) goto eob;
     idx++;
     dict_str = tabref(sbx->dict_str);
     if (dict_str && idx < dict_str->asize && tvisstr(arrayslot(dict_str, idx)))
@@ -329,6 +329,8 @@ static char *serialize_get(char *r, SBufExt *sbx, TValue *o)
   } else if (tp >= SER_TAG_TAB && tp <= SER_TAG_DICT_MT) {
     uint32_t narray = 0, nhash = 0;
     GCtab *t, *mt = NULL;
+    if (sbx->depth <= 0) lj_err_caller(sbufL(sbx), LJ_ERR_BUFFER_DEPTH);
+    sbx->depth--;
     if (tp == SER_TAG_DICT_MT) {
       GCtab *dict_mt;
       uint32_t idx;
@@ -367,6 +369,7 @@ static char *serialize_get(char *r, SBufExt *sbx, TValue *o)
 	r = serialize_get(r, sbx, v);
       } while (--nhash);
     }
+    sbx->depth++;
   } else if (tp >= SER_TAG_INT64 &&  tp <= SER_TAG_COMPLEX) {
     uint32_t sz = tp == SER_TAG_COMPLEX ? 16 : 8;
     GCcdata *cd;
@@ -376,6 +379,11 @@ static char *serialize_get(char *r, SBufExt *sbx, TValue *o)
 	   tp == SER_TAG_UINT64 ? CTID_UINT64 : CTID_COMPLEX_DOUBLE,
 	   sz);
     memcpy(cdataptr(cd), r, sz); r += sz;
+    if (sz == 16) {  /* Fix non-canonical NaNs. */
+      TValue *cdo = (TValue *)cdataptr(cd);
+      if (!tvisnum(&cdo[0])) setnanV(&cdo[0]);
+      if (!tvisnum(&cdo[1])) setnanV(&cdo[1]);
+    }
     setcdataV(sbufL(sbx), o, cd);
   } else if (tp <= SER_TAG_LIGHTUD64) {
     uintptr_t ud = 0;
@@ -412,6 +420,7 @@ SBufExt * lj_serialize_put(SBufExt *sbx, cTValue *o)
 /* Decode from buffer. */
 char * lj_serialize_get(SBufExt *sbx, TValue *o)
 {
+  sbx->depth = LJ_SERIALIZE_DEPTH;
   return serialize_get(sbx->r, sbx, o);
 }
 
@@ -435,7 +444,8 @@ void lj_serialize_decode(lua_State *L, TValue *o, GCstr *str)
   memset(&sbx, 0, sizeof(SBufExt));
   lj_bufx_set_cow(L, &sbx, strdata(str), str->len);
   /* No need to set sbx.cowref here. */
-  r = lj_serialize_get(&sbx, o);
+  sbx.depth = LJ_SERIALIZE_DEPTH;
+  r = serialize_get(sbx.r, &sbx, o);
   if (r != sbx.w) lj_err_caller(L, LJ_ERR_BUFFER_LEFTOV);
 }
 
