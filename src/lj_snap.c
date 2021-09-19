@@ -410,7 +410,7 @@ static TRef snap_dedup(jit_State *J, SnapEntry *map, MSize nmax, IRRef ref)
   MSize j;
   for (j = 0; j < nmax; j++)
     if (snap_ref(map[j]) == ref)
-      return J->slot[snap_slot(map[j])] & ~(SNAP_CONT|SNAP_FRAME);
+      return J->slot[snap_slot(map[j])] & ~(SNAP_KEYINDEX|SNAP_CONT|SNAP_FRAME);
   return 0;
 }
 
@@ -485,10 +485,12 @@ void lj_snap_replay(jit_State *J, GCtrace *T)
       uint32_t mode = IRSLOAD_INHERIT|IRSLOAD_PARENT;
       if (LJ_SOFTFP && (sn & SNAP_SOFTFPNUM)) t = IRT_NUM;
       if (ir->o == IR_SLOAD) mode |= (ir->op2 & IRSLOAD_READONLY);
+      if ((sn & SNAP_KEYINDEX)) mode |= IRSLOAD_KEYINDEX;
       tr = emitir_raw(IRT(IR_SLOAD, t), s, mode);
     }
   setslot:
-    J->slot[s] = tr | (sn&(SNAP_CONT|SNAP_FRAME));  /* Same as TREF_* flags. */
+    /* Same as TREF_* flags. */
+    J->slot[s] = tr | (sn&(SNAP_KEYINDEX|SNAP_CONT|SNAP_FRAME));
     J->framedepth += ((sn & (SNAP_CONT|SNAP_FRAME)) && (s != LJ_FR2));
     if ((sn & SNAP_FRAME))
       J->baseslot = s+1;
@@ -839,6 +841,11 @@ const BCIns *lj_snap_restore(jit_State *J, void *exptr)
 	continue;
       }
       snap_restoreval(J, T, ex, snapno, rfilt, ref, o);
+      if ((sn & SNAP_KEYINDEX)) {
+	/* A IRT_INT key index slot is restored as a number. Undo this. */
+	o->u32.lo = (uint32_t)lj_num2int(numV(o));
+	o->u32.hi = LJ_KEYINDEX;
+      }
     }
   }
   L->base += (map[nent] & 0xff);

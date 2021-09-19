@@ -1229,7 +1229,8 @@ static void asm_sload(ASMState *as, IRIns *ir)
 	     "bad parent SLOAD"); /* Handled by asm_head_side(). */
   lj_assertA(irt_isguard(t) || !(ir->op2 & IRSLOAD_TYPECHECK),
 	     "inconsistent SLOAD variant");
-  lj_assertA(!irt_isint(t) || (ir->op2 & (IRSLOAD_CONVERT|IRSLOAD_FRAME)),
+  lj_assertA(!irt_isint(t) ||
+	     (ir->op2 & (IRSLOAD_CONVERT|IRSLOAD_FRAME|IRSLOAD_KEYINDEX)),
 	     "bad SLOAD type");
   if ((ir->op2 & IRSLOAD_CONVERT) && irt_isguard(t) && irt_isint(t)) {
     Reg left = ra_scratch(as, RSET_FPR);
@@ -2065,7 +2066,15 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
     IRIns *ir = IR(ref);
     if ((sn & SNAP_NORESTORE))
       continue;
-    if (irt_isnum(ir->t)) {
+    if ((sn & SNAP_KEYINDEX)) {
+      emit_movmroi(as, RID_BASE, ofs+4, LJ_KEYINDEX);
+      if (irref_isk(ref)) {
+	emit_movmroi(as, RID_BASE, ofs, ir->i);
+      } else {
+	Reg src = ra_alloc1(as, ref, rset_exclude(RSET_GPR, RID_BASE));
+	emit_movtomro(as, src, RID_BASE, ofs);
+      }
+    } else if (irt_isnum(ir->t)) {
       Reg src = ra_alloc1(as, ref, RSET_FPR);
       emit_rmro(as, XO_MOVSDto, src, RID_BASE, ofs);
     } else {

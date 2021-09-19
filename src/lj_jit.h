@@ -97,6 +97,7 @@ typedef enum {
   LJ_TRACE_IDLE,	/* Trace compiler idle. */
   LJ_TRACE_ACTIVE = 0x10,
   LJ_TRACE_RECORD,	/* Bytecode recording active. */
+  LJ_TRACE_RECORD_1ST,	/* Record 1st instruction, too. */
   LJ_TRACE_START,	/* New trace started. */
   LJ_TRACE_END,		/* End of trace. */
   LJ_TRACE_ASM,		/* Assemble trace. */
@@ -137,12 +138,15 @@ typedef uint32_t SnapEntry;
 #define SNAP_CONT		0x020000	/* Continuation slot. */
 #define SNAP_NORESTORE		0x040000	/* No need to restore slot. */
 #define SNAP_SOFTFPNUM		0x080000	/* Soft-float number. */
+#define SNAP_KEYINDEX		0x100000	/* Traversal key index. */
 LJ_STATIC_ASSERT(SNAP_FRAME == TREF_FRAME);
 LJ_STATIC_ASSERT(SNAP_CONT == TREF_CONT);
+LJ_STATIC_ASSERT(SNAP_KEYINDEX == TREF_KEYINDEX);
 
 #define SNAP(slot, flags, ref)	(((SnapEntry)(slot) << 24) + (flags) + (ref))
 #define SNAP_TR(slot, tr) \
-  (((SnapEntry)(slot) << 24) + ((tr) & (TREF_CONT|TREF_FRAME|TREF_REFMASK)))
+  (((SnapEntry)(slot) << 24) + \
+   ((tr) & (TREF_KEYINDEX|TREF_CONT|TREF_FRAME|TREF_REFMASK)))
 #define SNAP_MKFTSZ(ftsz)	((SnapEntry)(ftsz))
 #define snap_ref(sn)		((sn) & 0xffff)
 #define snap_slot(sn)		((BCReg)((sn) >> 24))
