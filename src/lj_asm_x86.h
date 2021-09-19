@@ -191,9 +191,6 @@ static void asm_fuseahuref(ASMState *as, IRRef ref, RegSet allow)
       as->mrm.idx = RID_NONE;
       return;
     default:
-      lj_assertA(ir->o == IR_HREF || ir->o == IR_NEWREF || ir->o == IR_UREFO ||
-		 ir->o == IR_KKPTR,
-		 "bad IR op %d", ir->o);
       break;
     }
   }
@@ -419,6 +416,7 @@ static Reg asm_fuseload(ASMState *as, IRRef ref, RegSet allow)
       }
     } else if (ir->o == IR_VLOAD && !irt_isaddr(ir->t)) {
       asm_fuseahuref(as, ir->op1, xallow);
+      as->mrm.ofs += 8 * ir->op2;
       return RID_MRM;
     }
   }
@@ -1121,6 +1119,7 @@ static void asm_ahuvload(ASMState *as, IRIns *ir)
     RegSet allow = irt_isnum(ir->t) ? RSET_FPR : RSET_GPR;
     Reg dest = ra_dest(as, ir, allow);
     asm_fuseahuref(as, ir->op1, RSET_GPR);
+    if (ir->o == IR_VLOAD) as->mrm.ofs += 8 * ir->op2;
     if (irt_isaddr(ir->t)) {
       emit_shifti(as, XOg_SHR|REX_64, dest, 17);
       asm_guardcc(as, CC_NE);
@@ -1144,6 +1143,7 @@ static void asm_ahuvload(ASMState *as, IRIns *ir)
       gpr = rset_exclude(gpr, tmp);
     }
     asm_fuseahuref(as, ir->op1, gpr);
+    if (ir->o == IR_VLOAD) as->mrm.ofs += 8 * ir->op2;
   }
   /* Always do the type check, even if the load result is unused. */
   as->mrm.ofs += 4;
