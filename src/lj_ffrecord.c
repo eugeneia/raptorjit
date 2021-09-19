@@ -183,6 +183,14 @@ static TRef recff_bufhdr(jit_State *J)
 		lj_ir_kptr(J, &J2G(J)->tmpbuf), IRBUFHDR_RESET);
 }
 
+/* Emit TMPREF. */
+static TRef recff_tmpref(jit_State *J, TRef tr, int mode)
+{
+  if (tref_isinteger(tr))
+    tr = emitir(IRTN(IR_CONV), tr, IRCONV_NUM_INT);
+  return emitir(IRT(IR_TMPREF, IRT_PGC), tr, mode);
+}
+
 /* -- Base library fast functions ----------------------------------------- */
 
 static void recff_assert(jit_State *J, RecordFFData *rd)
@@ -295,7 +303,7 @@ int32_t lj_ffrecord_select_mode(jit_State *J, TRef tr, TValue *tv)
     } else {
       TRef trptr = emitir(IRT(IR_STRREF, IRT_PGC), tr, lj_ir_kint(J, 0));
       TRef trchar = emitir(IRT(IR_XLOAD, IRT_U8), trptr, IRXLOAD_READONLY);
-      emitir(IRTG(IR_EQ, IRT_INT), trchar, lj_ir_kint(J, '#'));
+      emitir(IRTGI(IR_EQ), trchar, lj_ir_kint(J, '#'));
     }
     return 0;
   } else {  /* select(n, ...) */
@@ -1247,10 +1255,7 @@ static void recff_buffer_method_encode(jit_State *J, RecordFFData *rd)
 {
   TRef ud = recff_sbufx_check(J, rd, 0);
   TRef trbuf = recff_sbufx_write(J, ud);
-  TRef tmp, tr = J->base[1];
-  if (tref_isinteger(tr))
-    tr = emitir(IRTN(IR_CONV), tr, IRCONV_NUM_INT);
-  tmp = emitir(IRT(IR_TMPREF, IRT_PGC), tr, IRTMPREF_IN1);
+  TRef tmp = recff_tmpref(J, J->base[1], IRTMPREF_IN1);
   lj_ir_call(J, IRCALL_lj_serialize_put, trbuf, tmp);
   /* No IR_USE needed, since the call is a store. */
 }
@@ -1259,12 +1264,10 @@ static void recff_buffer_method_decode(jit_State *J, RecordFFData *rd)
 {
   TRef ud = recff_sbufx_check(J, rd, 0);
   TRef trbuf = recff_sbufx_write(J, ud);
-  TRef trr, tmp;
-  IRType t;
-  tmp = emitir(IRT(IR_TMPREF, IRT_PGC), REF_NIL, IRTMPREF_OUT1);
-  trr = lj_ir_call(J, IRCALL_lj_serialize_get, trbuf, tmp);
+  TRef tmp = recff_tmpref(J, TREF_NIL, IRTMPREF_OUT1);
+  TRef trr = lj_ir_call(J, IRCALL_lj_serialize_get, trbuf, tmp);
+  IRType t = (IRType)lj_serialize_peektype(bufV(&rd->argv[0]));
   /* No IR_USE needed, since the call is a store. */
-  t = (IRType)lj_serialize_peektype(bufV(&rd->argv[0]));
   J->base[0] = lj_record_vload(J, tmp, 0, t);
   /* The sbx->r store must be after the VLOAD type check, in case it fails. */
   recff_sbufx_set_ptr(J, ud, IRFL_SBUF_R, trr);
@@ -1272,10 +1275,7 @@ static void recff_buffer_method_decode(jit_State *J, RecordFFData *rd)
 
 static void recff_buffer_encode(jit_State *J, RecordFFData *rd)
 {
-  TRef tmp, tr = J->base[0];
-  if (tref_isinteger(tr))
-    tr = emitir(IRTN(IR_CONV), tr, IRCONV_NUM_INT);
-  tmp = emitir(IRT(IR_TMPREF, IRT_PGC), tr, IRTMPREF_IN1);
+  TRef tmp = recff_tmpref(J, J->base[0], IRTMPREF_IN1);
   J->base[0] = lj_ir_call(J, IRCALL_lj_serialize_encode, tmp);
   /* IR_USE needed for IR_CALLA, because the encoder may throw non-OOM. */
   emitir(IRT(IR_USE, IRT_NIL), J->base[0], 0);
@@ -1287,10 +1287,9 @@ static void recff_buffer_decode(jit_State *J, RecordFFData *rd)
   if (tvisstr(&rd->argv[0])) {
     GCstr *str = strV(&rd->argv[0]);
     SBufExt sbx;
-    TRef tr, tmp;
     IRType t;
-    tmp = emitir(IRT(IR_TMPREF, IRT_PGC), REF_NIL, IRTMPREF_OUT1);
-    tr = lj_ir_call(J, IRCALL_lj_serialize_decode, tmp, J->base[0]);
+    TRef tmp = recff_tmpref(J, TREF_NIL, IRTMPREF_OUT1);
+    TRef tr = lj_ir_call(J, IRCALL_lj_serialize_decode, tmp, J->base[0]);
     /* IR_USE needed for IR_CALLA, because the decoder may throw non-OOM.
     ** That's why IRCALL_lj_serialize_decode needs a fake INT result.
     */
