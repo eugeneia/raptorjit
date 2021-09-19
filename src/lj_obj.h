@@ -209,6 +209,8 @@ typedef const TValue cTValue;
 #define LJ_TISGCV		(LJ_TSTR+1)
 #define LJ_TISTABUD		LJ_TTAB
 
+/* Type marker for slot holding a traversal index. Must be lightuserdata. */
+#define LJ_KEYINDEX		0xfffe7fffu
 #define LJ_GCVMASK		(((uint64_t)1 << 47) - 1)
 
 /* To stay within 47 bits, lightuserdata is segmented. */
