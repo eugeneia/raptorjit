@@ -749,6 +749,50 @@ static void ra_left(ASMState *as, Reg dest, IRRef lref)
   }
 }
 
+/* Force a RID_RETLO/RID_RETHI destination register pair (marked as free). */
+static void ra_destpair(ASMState *as, IRIns *ir)
+{
+  Reg destlo = ir->r, desthi = (ir+1)->r;
+  IRIns *irx = (!irt_is64(ir->t)) ? ir+1 : ir;
+  /* First spill unrelated refs blocking the destination registers. */
+  if (!rset_test(as->freeset, RID_RETLO) &&
+      destlo != RID_RETLO && desthi != RID_RETLO)
+    ra_restore(as, regcost_ref(as->cost[RID_RETLO]));
+  if (!rset_test(as->freeset, RID_RETHI) &&
+      destlo != RID_RETHI && desthi != RID_RETHI)
+    ra_restore(as, regcost_ref(as->cost[RID_RETHI]));
+  /* Next free the destination registers (if any). */
+  if (ra_hasreg(destlo)) {
+    ra_free(as, destlo);
+    ra_modified(as, destlo);
+  } else {
+    destlo = RID_RETLO;
+  }
+  if (ra_hasreg(desthi)) {
+    ra_free(as, desthi);
+    ra_modified(as, desthi);
+  } else {
+    desthi = RID_RETHI;
+  }
+  /* Check for conflicts and shuffle the registers as needed. */
+  if (destlo == RID_RETHI) {
+    if (desthi == RID_RETLO) {
+      *--as->mcp = REX_64IR(irx, XI_XCHGa + RID_RETHI);
+    } else {
+      emit_movrr(as, irx, RID_RETHI, RID_RETLO);
+      if (desthi != RID_RETHI) emit_movrr(as, irx, desthi, RID_RETHI);
+    }
+  } else if (desthi == RID_RETLO) {
+    emit_movrr(as, irx, RID_RETLO, RID_RETHI);
+    if (destlo != RID_RETLO) emit_movrr(as, irx, destlo, RID_RETLO);
+  } else {
+    if (desthi != RID_RETHI) emit_movrr(as, irx, desthi, RID_RETHI);
+    if (destlo != RID_RETLO) emit_movrr(as, irx, destlo, RID_RETLO);
+  }
+  /* Restore spill slots (if any). */
+  if (ra_hasspill((ir+1)->s)) ra_save(as, ir+1, RID_RETHI);
+  if (ra_hasspill(ir->s)) ra_save(as, ir, RID_RETLO);
+}
 
 /* -- Snapshot handling --------- ----------------------------------------- */
 
@@ -1972,6 +2016,17 @@ static void asm_setup_regsp(ASMState *as)
 		      (RSET_SCRATCH & ~RSET_FPR) : RSET_SCRATCH;
       continue;
       }
+    case IR_HIOP:
+      switch ((ir-1)->o) {
+      /* fallthrough */
+      case IR_CALLN: case IR_CALLL: case IR_CALLS: case IR_CALLXS:
+	(ir-1)->prev = REGSP_HINT(RID_RETLO);
+	ir->prev = REGSP_HINT(RID_RETHI);
+	continue;
+      default:
+	break;
+      }
+      break;
     /* fallthrough */
     /* C calls evict all scratch regs and return results in RID_RET. */
     case IR_SNEW: case IR_XSNEW: case IR_NEWREF: case IR_BUFPUT:
