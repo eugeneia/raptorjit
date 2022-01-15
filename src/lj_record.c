@@ -630,7 +630,7 @@ static LoopEvent rec_itern(jit_State *J, BCReg ra, BCReg rb)
   /* Since ITERN is recorded at the start, we need our own loop detection. */
   if (J->pc == J->startpc &&
       (J->cur.nins > REF_FIRST+1 ||
-       (J->cur.nins == REF_FIRST+1 && J->cur.ir[REF_FIRST].o != IR_PROF)) &&
+       (J->cur.nins == REF_FIRST+1)) &&
       J->framedepth + J->retdepth == 0 && J->parent == 0 && J->exitno == 0) {
     lj_record_stop(J, LJ_TRLINK_LOOP, J->cur.traceno);  /* Looping trace. */
     return LOOPEV_ENTER;
