@@ -54,11 +54,12 @@ LJ_ASMF int32_t lj_vm_modi(int32_t, int32_t);
 LJ_ASMF void lj_vm_floor_sse(void);
 LJ_ASMF void lj_vm_ceil_sse(void);
 LJ_ASMF void lj_vm_trunc_sse(void);
-LJ_ASMF void lj_vm_powi_sse(void);
-LJ_ASMF double lj_vm_powi(double, int32_t);
 LJ_ASMF double lj_vm_trunc(double);
 LJ_ASMF int lj_vm_errno(void);
 LJ_ASMF TValue *lj_vm_next(GCtab *t, uint32_t idx);
+
+LJ_ASMF double lj_vm_powi(double, int32_t);
+LJ_ASMF double lj_vm_pow(double, double);
 
 /* Continuations for metamethods. */
 LJ_ASMF void lj_cont_cat(void);  /* Continue with concatenation. */
