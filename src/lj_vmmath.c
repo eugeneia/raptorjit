@@ -18,47 +18,6 @@
 
 /* -- Helper functions ---------------------------------------------------- */
 
-/* Unsigned x^k. */
-static double lj_vm_powui(double x, uint32_t k)
-{
-  double y;
-  lj_assertX(k != 0, "pow with zero exponent");
-  for (; (k & 1) == 0; k >>= 1) x *= x;
-  y = x;
-  if ((k >>= 1) != 0) {
-    for (;;) {
-      x *= x;
-      if (k == 1) break;
-      if (k & 1) y *= x;
-      k >>= 1;
-    }
-    y *= x;
-  }
-  return y;
-}
-
-/* Signed x^k. */
-double lj_vm_powi(double x, int32_t k)
-{
-  if (k > 1)
-    return lj_vm_powui(x, (uint32_t)k);
-  else if (k == 1)
-    return x;
-  else if (k == 0)
-    return 1.0;
-  else
-    return 1.0 / lj_vm_powui(x, (uint32_t)-k);
-}
-
-double lj_vm_pow(double x, double y)
-{
-  int32_t k = lj_num2int(y);
-  if ((k >= -65536 && k <= 65536) && y == (double)k)
-    return lj_vm_powi(x, k);
-  else
-    return pow(x, y);
-}
-
 double lj_vm_foldarith(double x, double y, int op)
 {
   switch (op) {
@@ -67,7 +26,7 @@ double lj_vm_foldarith(double x, double y, int op)
   case IR_MUL - IR_ADD: return x*y; break;
   case IR_DIV - IR_ADD: return x/y; break;
   case IR_MOD - IR_ADD: return x-lj_vm_floor(x/y)*y; break;
-  case IR_POW - IR_ADD: return lj_vm_pow(x, y); break;
+  case IR_POW - IR_ADD: return pow(x, y); break;
   case IR_NEG - IR_ADD: return -x; break;
   case IR_ABS - IR_ADD: return fabs(x); break;
   case IR_LDEXP - IR_ADD: return ldexp(x, (int)y); break;

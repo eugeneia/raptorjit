@@ -1520,8 +1520,7 @@ static void asm_pow(ASMState *as, IRIns *ir)
     asm_callid(as, ir, irt_isi64(ir->t) ? IRCALL_lj_carith_powi64 :
 					  IRCALL_lj_carith_powu64);
   else
-  asm_callid(as, ir, irt_isnum(IR(ir->op2)->t) ? IRCALL_lj_vm_pow :
-						 IRCALL_lj_vm_powi);
+  asm_callid(as, ir, IRCALL_pow);
 }
 
 static void asm_div(ASMState *as, IRIns *ir)
