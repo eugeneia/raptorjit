@@ -777,7 +777,8 @@ static void ra_destpair(ASMState *as, IRIns *ir)
   /* Check for conflicts and shuffle the registers as needed. */
   if (destlo == RID_RETHI) {
     if (desthi == RID_RETLO) {
-      *--as->mcp = REX_64IR(irx, XI_XCHGa + RID_RETHI);
+      *--as->mcp = XI_XCHGa + RID_RETHI;
+      if (irt_is64(irx->t)) *--as->mcp = 0x48;
     } else {
       emit_movrr(as, irx, RID_RETHI, RID_RETLO);
       if (desthi != RID_RETHI) emit_movrr(as, irx, desthi, RID_RETHI);
