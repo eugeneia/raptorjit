@@ -290,11 +290,13 @@ enum {
   LJ_K64_M2P64_31 = LJ_K64_M2P64,
   LJ_K64__MAX,
 };
+#define LJ_K64__USED	(LJ_TARGET_X86ORX64 || LJ_TARGET_MIPS)
 
 enum {
   LJ_K32_M2P64_31,	/* -2^64 or -2^31 */
   LJ_K32__MAX
 };
+#define LJ_K32__USED	(LJ_TARGET_X86ORX64 || LJ_TARGET_PPC || LJ_TARGET_MIPS)
 
 /* Get 16 byte aligned pointer to SIMD constant. */
 #define LJ_KSIMD(J, n) \
@@ -351,9 +353,13 @@ typedef struct jit_State {
   int32_t framedepth;	/* Current frame depth. */
   int32_t retdepth;	/* Return frame depth (count of RETF). */
 
+#if LJ_K32__USED
   uint32_t k32[LJ_K32__MAX];  /* Common 4 byte constants used by backends. */
+#endif
   TValue ksimd[LJ_KSIMD__MAX*2+1];  /* 16 byte aligned SIMD constants. */
+#if LJ_K64__USED
   TValue k64[LJ_K64__MAX];  /* Common 8 byte constants. */
+#endif
 
   IRIns *irbuf;		/* Temp. IR instruction buffer. Biased with REF_BIAS. */
   IRRef loopref;	/* Last loop reference or ref of final LOOP (or 0). */
