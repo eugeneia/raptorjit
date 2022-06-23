@@ -326,7 +326,7 @@ The recommended way to fetch the latest version is to do a pull from
 the git repository.
 </p>
 <p>
-Alternatively download the latest source package of LuaJIT (pick the .tar.gz).
+Alternatively, download the latest source package of LuaJIT (pick the .tar.gz).
 Move it to a directory of your choice, open a terminal window and change
 to this directory. Now unpack the archive and change to the newly created
 directory (replace XX.YY.ZZ with the version you downloaded):
@@ -496,16 +496,12 @@ use the canonical toolchain triplets for Linux.
 </p>
 <p>
 Since there's often no easy way to detect CPU features at runtime, it's
-important to compile with the proper CPU or architecture settings:
-</o>
-<ul>
-<li>The best way to get consistent results is to specify the correct settings when building the toolchain yourself.</li>
-<li>For a pre-built, generic toolchain add <tt>-mcpu=...</tt> or <tt>-march=...</tt> and other necessary flags to <tt>TARGET_CFLAGS</tt>.</li>
-<li>For ARM it's important to have the correct <tt>-mfloat-abi=...</tt> setting, too. Otherwise LuaJIT may not run at the full performance of your target CPU.</li>
-<li>For MIPS it's important to select a supported ABI (o32 on MIPS32, n64 on MIPS64) and consistently compile your project either with hard-float or soft-float compiler settings.</li>
-</ul>
-<p>
-Here are some examples for targets with a different CPU than the host:
+important to compile with the proper CPU or architecture settings. You
+can specify these when building the toolchain yourself. Or add
+<tt>-mcpu=...</tt> or <tt>-march=...</tt> to <tt>TARGET_CFLAGS</tt>. For
+ARM it's important to have the correct <tt>-mfloat-abi=...</tt> setting,
+too. Otherwise, LuaJIT may not run at the full performance of your target
+CPU.
 </p>
 <pre class="code">
 # ARM soft-float
@@ -664,7 +660,7 @@ allocator from your system (no support for this on 64&nbsp;bit architectures).</
 of calling <tt>luaopen_base</tt> etc. directly.</li>
 <li>To change or extend the list of standard libraries to load, copy
 <tt>src/lib_init.c</tt> to your project and modify it accordingly.
-Make sure the <tt>jit</tt> library is loaded or the JIT compiler
+Make sure the <tt>jit</tt> library is loaded, or the JIT compiler
 will not be activated.</li>
 <li>The <tt>bit.*</tt> module for bitwise operations
 is already built-in. There's no need to statically link
@@ -683,7 +679,7 @@ in unspeakable ways.
 There should be absolutely no need to patch <tt>luaconf.h</tt> or any
 of the Makefiles. And please do not hand-pick files for your packages &mdash;
 simply use whatever <tt>make install</tt> creates. There's a reason
-for all of the files <em>and</em> directories it creates.
+for all the files <em>and</em> directories it creates.
 </p>
 <p>
 The build system uses GNU make and auto-detects most settings based on
