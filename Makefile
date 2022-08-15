@@ -33,7 +33,8 @@ DPREFIX= $(DESTDIR)$(PREFIX)
 INSTALL_BIN=   $(DPREFIX)/bin
 INSTALL_LIB=   $(DPREFIX)/$(MULTILIB)
 INSTALL_SHARE= $(DPREFIX)/share
-INSTALL_INC=   $(DPREFIX)/include/raptorjit-$(MAJVER).$(MINVER)
+INSTALL_DEFINC= $(DPREFIX)/include/raptorjit-$(MAJVER).$(MINVER)
+INSTALL_INC=   $(INSTALL_DEFINC)
 
 INSTALL_LJLIBD= $(INSTALL_SHARE)/raptorjit-$(VERSION)
 INSTALL_JITLIB= $(INSTALL_LJLIBD)/jit
@@ -72,6 +73,9 @@ UNINSTALL= $(RM)
 LDCONFIG= ldconfig -n 2>/dev/null
 SED_PC= sed -e "s|^prefix=.*|prefix=$(PREFIX)|" \
             -e "s|^multilib=.*|multilib=$(MULTILIB)|"
+ifneq ($(INSTALL_DEFINC),$(INSTALL_INC))
+  SED_PC+= -e "s|^includedir=.*|includedir=$(INSTALL_INC)|"
+endif
 
 FILE_T= raptorjit
 FILE_A= libraptorjit.a
