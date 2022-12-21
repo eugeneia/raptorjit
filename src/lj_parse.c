@@ -943,11 +943,11 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
     if (op == BC_UNM && !expr_hasjump(e)) {  /* Constant-fold negations. */
       if (e->k == VKCDATA) {  /* Fold in-place since cdata is not interned. */
 	GCcdata *cd = cdataV(&e->u.nval);
-	int64_t *p = (int64_t *)cdataptr(cd);
+	uint64_t *p = (uint64_t *)cdataptr(cd);
 	if (cd->ctypeid == CTID_COMPLEX_DOUBLE)
-	  p[1] ^= (int64_t)U64x(80000000,00000000);
+	  p[1] ^= U64x(80000000,00000000);
 	else
-	  *p = -*p;
+	  *p = ~*p+1u;
 	return;
       } else
       if (expr_isnumk(e) && !expr_numiszero(e)) {  /* Avoid folding to -0. */
