@@ -497,6 +497,8 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
   hook_restore(g, oldh);
   g->gc.threshold = oldt;  /* Restore GC threshold. */
   if (errcode)
+    /* See 1c279127, raptorjit keeps the old behavior
+       because we do not have vmevent */
     lj_err_throw(L, errcode);  /* Propagate errors. */
 }
 
