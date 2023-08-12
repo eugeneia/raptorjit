@@ -174,13 +174,16 @@ static void bcwrite_knum(BCWriteCtx *ctx, GCproto *pt)
   for (i = 0; i < sizekn; i++, o++) {
     int32_t k;
     /* Write a 33 bit ULEB128 for the int (lsb=0) or loword (lsb=1). */
-    lua_Number num = numV(o);
-    k = lj_num2int(num);
-    if (num == (lua_Number)k) {  /* -0 is never a constant. */
-      p = lj_strfmt_wuleb128(p, 2*(uint32_t)k | ((uint32_t)k&0x80000000u));
-      if (k < 0)
-        p[-1] = (p[-1] & 7) | ((k>>27) & 0x18);
-      continue;
+    if (o->u32.hi != LJ_KEYINDEX) {
+      /* Narrow number constants to integers. */
+	    lua_Number num = numV(o);
+	    k = lj_num2int(num);
+	    if (num == (lua_Number)k) {  /* -0 is never a constant. */
+	      p = lj_strfmt_wuleb128(p, 2*(uint32_t)k | ((uint32_t)k&0x80000000u));
+	      if (k < 0)
+	        p[-1] = (p[-1] & 7) | ((k>>27) & 0x18);
+	      continue;
+	    }
     }
     p = lj_strfmt_wuleb128(p, 1+(2*o->u32.lo | (o->u32.lo & 0x80000000u)));
     if (o->u32.lo >= 0x80000000u)
