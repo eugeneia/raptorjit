@@ -37,8 +37,8 @@ LJ_ASMF void lj_vm_callhook(void);
 LJ_ASMF void lj_vm_IITERN(void);
 
 /* Trace exit handling. */
-LJ_ASMF void lj_vm_exit_handler(void);
-LJ_ASMF void lj_vm_exit_interp(void);
+LJ_ASMF char lj_vm_exit_handler[];
+LJ_ASMF char lj_vm_exit_interp[];
 LJ_ASMF void lj_vm_exit_interp_notrack(void);
 
 /* Internal math helper functions. */
@@ -71,6 +71,6 @@ LJ_ASMF void lj_cont_stitch(void);  /* Trace stitching. */
 LJ_ASMF char lj_vm_asm_begin[];
 
 /* Bytecode offsets are relative to lj_vm_asm_begin. */
-#define makeasmfunc(ofs)	((ASMFunction)(lj_vm_asm_begin + (ofs)))
+#define makeasmfunc(ofs) (ASMFunction)(lj_vm_asm_begin + (ofs))
 
 #endif

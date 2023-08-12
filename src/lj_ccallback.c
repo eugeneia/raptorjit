@@ -71,9 +71,9 @@ MSize lj_ccallback_ptr2slot(CTState *cts, void *p)
 static uint8_t *callback_mcode_init(global_State *g, uint8_t *page)
 {
   uint8_t *p = page;
-  uint8_t *target = (uint8_t *)(void *)lj_vm_ffi_callback;
+  ASMFunction target = lj_vm_ffi_callback;
   MSize slot;
-  *(void **)p = target; p += 8;
+  ((ASMFunction *)p)[0] = target; p += 8;
   for (slot = 0; slot < CALLBACK_MAX_SLOT; slot++) {
     /* mov al, slot; jmp group */
     *p++ = XI_MOVrib | RID_EAX; *p++ = (uint8_t)slot;
