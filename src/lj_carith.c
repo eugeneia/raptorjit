@@ -336,8 +336,7 @@ uint64_t lj_carith_check64(lua_State *L, int narg, CTypeID *id)
   } else if (!(tvisstr(o) && lj_strscan_number(strV(o), o))) {
     goto err;
   }
-  int32_t i = lj_num2bit(numV(o));
-  return (uint32_t)i;
+  return (uint32_t)lj_num2bit(numV(o));
 }
 
 
