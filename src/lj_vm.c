@@ -1764,7 +1764,7 @@ void execute(lua_State *L) {
         nresults = max(1+end-start, 0);
         assert(BASE+nresults <= mref(L->maxstack, TValue));
         for (i=0; i+start <= end; i++)
-          setnumV(BASE+i, strdata(str)[i+start-1]);
+          setnumV(BASE+i, (uint8_t)(strdata(str)[i+start-1]));
         if (vm_return(L, BASE[-1].u64, 0, nresults)) return;
       } else if (fff_fallback(L)) return;
       break;
