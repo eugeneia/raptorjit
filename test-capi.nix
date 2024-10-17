@@ -1,5 +1,7 @@
 { pkgs, raptorjit, ... }:
 with pkgs;
+#with llvmPackages_12.stdenv;
+with stdenv;
 
 let lpty =
   fetchurl rec {
@@ -8,7 +10,7 @@ let lpty =
   };
 in
 
-stdenv.mkDerivation {
+mkDerivation {
   name = "test-capi";
   src = lpty;
   phases = "unpackPhase buildPhase testPhase";

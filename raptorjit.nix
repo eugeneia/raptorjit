@@ -3,8 +3,8 @@
 { pkgs, source, version }:
 
 with pkgs;
-#with llvmPackages_4.stdenv;  # Use clang 4.0
-with stdenv;
+with llvmPackages_12.stdenv;  # Use clang
+#with stdenv;
 
 mkDerivation rec {
   name = "raptorjit-${version}";
