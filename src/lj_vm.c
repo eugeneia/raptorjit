@@ -819,7 +819,7 @@ void execute(lua_State *L) {
       GCfunc *fn = funcV(BASE-2);
       TValue e, k, *v;
       setgcVraw(&e, fn->l.env, LJ_TTAB);
-      setgcVraw(&k, kgcref(C, GCobj), LJ_TSTR);
+      setgcVraw(&k, kgcref(D, GCobj), LJ_TSTR);
       v = lj_meta_tset(L, &e, &k);
       if (v) {
         copyTV(L, v, BASE+A);
