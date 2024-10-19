@@ -3,7 +3,7 @@
 { pkgs, source, version }:
 
 with pkgs;
-with llvmPackages_12.stdenv;  # Use clang
+with llvmPackages_16.stdenv;  # Use clang
 #with stdenv;
 
 mkDerivation rec {
