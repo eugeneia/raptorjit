@@ -27,6 +27,8 @@
 #include "lj_err.h"
 #include "lj_vm_tcs.h"
 
+#define LUA_VM_DEBUG 1
+
 #ifdef LUA_VM_DEBUG
 /* Count of executed instructions for debugger prosperity. */
 static volatile uint64_t insctr;
@@ -40,19 +42,23 @@ static volatile uint64_t insctr;
  * onward.
  */
 static volatile uint64_t insctr_tracefrom = UINT64_MAX;
+static volatile uint64_t insctr_traceto = UINT64_MAX;
+
+const char *const bc_names[] = {
+#define BCENUM(name, ma, mb, mc, mt)	#name,
+BCDEF(BCENUM)
+#undef BCENUM
+  NULL
+};
 
 #define TRACE(name)                                                     \
-  if (insctr >= insctr_tracefrom)                                       \
-    printf("%-6lu %-6s A=%-3d B=%-3d C=%-3d D=%-5d stackdepth=%-3ld%s\n", \
-           insctr, name, A, B, C, D, TOP-BASE,                          \
+  if (insctr >= insctr_tracefrom && insctr <= insctr_traceto)            \
+    printf("%-6lu %-6s OP=%-3x A=%-3d B=%-3d C=%-3d D=%-5d stackdepth=%-3ld%s\n", \
+           insctr, name, OP, A, B, C, D, TOP-BASE,                          \
            (G(L)->dispatchmode & DISPMODE_REC) ? " [rec]" : "")
-#define TRACEFF(name)                                           \
-  if (insctr >= insctr_tracefrom)                               \
-    printf("%-6lu ASMFF  OP=%-3x %-10s\n", insctr, OP, name)
 #endif
 #ifndef LUA_VM_DEBUG
 #define TRACE(name) ((void)0)
-#define TRACEFF(name) ((void)0)
 #endif
 
 #define neg(n) (-1 - (n))
@@ -247,1589 +253,1591 @@ static TValue *copyTVs(lua_State *L, TValue *dst, TValue *src,
 }
 
 /* Return the nth constant TValue. */
-static inline TValue* ktv(int n)
-{
-  return (TValue*)KBASE + n;
-}
+#define ktv(n) ((TValue*)KBASE + n)
 
 /* Return the nth constant GC object. */
-static inline const GCobj* kgc(int n)
-{
-  return *((const GCobj**)KBASE-1-n);
-}
-
-static inline void branchPC(int offset)
-{
-  PC += offset - BCBIAS_J;
-}
+#define kgc(n) *((const GCobj**)KBASE-1-n)
 
 /* Reference the nth constant GC object with known type. */
 #define kgcref(n, type) ((type *)kgc(n))
 
+/* Branch to JMP:J. */
+#define branchPC(offset) { PC += offset - BCBIAS_J; }
+
 
 /* Execute virtual machine instructions in a tail-recursive loop. */
-void execute(lua_State *L) {
-  BCIns curins;
- execute:
-  #ifdef LUA_VM_DEBUG
+
+#define TAILCALL __attribute__((musttail)) return
+
+VM_FUNC(dispatch) {
+#ifdef LUA_VM_DEBUG
   insctr++;
-  #endif
-  vm_dispatch(L); /* Load curins after! (Can patch next bytecode at *PC.) */
+#endif
   curins = *PC++;
-  switch (OP) {
-  case BC_ISLT:
-    /* ISLT: Take following JMP instruction if A < D. */
-    if (OP == BC_ISLT) TRACE("ISLT");
-  case BC_ISGE:
-    /* ISGE: Take following JMP instruction if A >= D. */
-    if (OP == BC_ISGE) TRACE("ISGE");
-  case BC_ISLE:
-    /* ISLE: Take following JMP instruction if A <= D. */
-    if (OP == BC_ISLE) TRACE("ISLE");
-  case BC_ISGT:
-    /* ISGT: Take following JMP instruction if A > D. */
-    if (OP == BC_ISGT) TRACE("ISGT");
-    {
-      int flag = 0;
-      if (tvisnum(BASE+A) && tvisnum(BASE+D)) {
-        double x = BASE[A].n, y = BASE[D].n;
-        /* Compare two floats.
-         *
-         * Note: to preserve NaN semantics GE/GT branch on unordered, but LT/LE
-         * don't.
-         */
-        if (OP == BC_ISLT)
-          flag = x < y;
-        else if (OP == BC_ISGE)
-          flag = x >= y || isnan(x) || isnan(y);
-        else if (OP == BC_ISLE)
-          flag = x <= y;
-        else if (OP == BC_ISGT)
-          flag = x > y || isnan(x) || isnan(y);
-      } else {
-        /* Fall back to meta-comparison. */
-        vm_savepc(L, PC);
-        TValue *res = lj_meta_comp(L, BASE+A, BASE+D, OP);
-        if ((intptr_t)res > 1) {
-          vm_call_cont(L, res, 2);
-          break; /* Do not clobber PC! */
-        } else
-          flag = (intptr_t)res == 1;
-      }
-      /* Advance to jump instruction. */
-      curins = *PC++;
-      if (flag) branchPC(D);
-    }
-    break;
-  case BC_ISEQV:
-    /* ISEQV: Take following JMP instruction if A is equal to D. */
-    TRACE("ISEQV");
-  case BC_ISNEV:
-    /* ISNEV: Take following JMP instruction if A is not equal to D. */
-    if (OP == BC_ISNEV)
-      TRACE("ISNEV");
-    {
-      TValue *x = BASE+A; TValue *y = BASE+D;
-      int flag = (OP == BC_ISNEV); // Invert flag on ISNEV.
-      if (tvisnum(x) && tvisnum(y))
-        flag ^= (x->n == y->n);
-      else if (tviscdata(x) || tviscdata(y)) {
-        // Either object is cdata.
-        vm_savepc(L, (BCIns*)((intptr_t)PC-4));
-        TValue *res = lj_meta_equal_cd(L, curins);
-        if ((intptr_t)res > 1) {
-          vm_call_cont(L, res, 2);
-          break; /* Do not clobber PC! */
-        } else
-          flag = (intptr_t)res;
-      } else if (x->u64 == y->u64)
-        // Same GCobjs or pvalues?
-        flag ^= 1;
-      else if (itype(x) != itype(y))
-        // Not the same type?
-        flag = flag;
-      else if (itype(x) <= LJ_TISTABUD) {
-        // Different tables or userdatas. Need to check __eq metamethod.
-        vm_savepc(L, (BCIns*)((intptr_t)PC-4));
-        TValue *res = lj_meta_equal(L, gcval(BASE+A), gcval(BASE+D), flag);
-        if ((intptr_t)res != flag) {
-          vm_call_cont(L, res, 2);
-          break; /* Do not clobber PC! */
-        }
-      }
-      curins = *PC++;
-      if (flag) branchPC(D);
-    }
-    break;
-  case BC_ISEQS:
-    /* ISEQS: Take following JMP instruction if A is equal to string D. */
-    TRACE("ISEQS");
-  case BC_ISNES:
-    /* ISNES: Take following JMP instruction if A is not equal to string D. */
-    if (OP == BC_ISNES)
-      TRACE("ISNES");
-    {
-      int flag = (OP == BC_ISNES); // Invert flag on ISNES.
-      if (tvisstr(BASE+A))
-        flag ^= (strV(BASE+A) == kgcref(D, GCstr));
-      else if (tviscdata(BASE+A)) {
-        vm_savepc(L, (BCIns*)((intptr_t)PC-4));
-        TValue *res = lj_meta_equal_cd(L, curins);
-        if ((intptr_t)res > 1) {
-          vm_call_cont(L, res, 2);
-          break; /* Do not clobber PC! */
-        } else
-          flag = (intptr_t)res;
-      }
-      curins = *PC++;
-      if (flag) branchPC(D);
-    }
-    break;
-  case BC_ISEQN:
-    /* ISEQN: Take following JMP if A is equal to number constant D. */
-    TRACE("ISEQN");
-  case BC_ISNEN:
-    /* ISNEN: Take following JMP if A is not equal to number constant D. */
-    if (OP == BC_ISNEN)
-      TRACE("ISNEN");
-    {
-      int flag = (OP == BC_ISNEN); // Invert flag on ISNEN.
-      if (tvisnum(BASE+A))
-        flag ^= numV(BASE+A) == numV(ktv(D));
-      else if (tviscdata(BASE+A)) {
-        vm_savepc(L, (BCIns*)((intptr_t)PC-4));
-        TValue *res = lj_meta_equal_cd(L, curins);
-        if ((intptr_t)res > 1) {
-          vm_call_cont(L, res, 2);
-          break; /* Do not clobber PC! */
-        } else
-          flag = (intptr_t)res;
-      }
-      curins = *PC++;
-      if (flag) branchPC(D);
-    }
-    break;
-  case BC_ISEQP:
-    /* ISEQP: Take following JMP if A is equal to primtive D.*/
-    TRACE("ISEQP");
-  case BC_ISNEP:
-    /* ISNEP: Take following JMP unless A is equal to primtive D.*/
-    if (OP == BC_ISNEP)
-      TRACE("ISNEP");
-    {
-      int flag = (OP == BC_ISNEP); // Invert flag on ISNEP.
-      if (itype(BASE+A) == ~D)
-        /* If the types match than A is nil/false/true and equal to pri D. */
-        flag ^= 1;
-      else if (tviscdata(BASE+A)) {
-        vm_savepc(L, (BCIns*)((intptr_t)PC-4));
-        TValue *res = lj_meta_equal_cd(L, curins);
-        if ((intptr_t)res > 1) {
-          vm_call_cont(L, res, 2);
-          break; /* Do not clobber PC! */
-        } else
-          flag = (intptr_t)res;
-      }
-      curins = *PC++;
-      if (flag) branchPC(D);
-    }
-    break;
-  case BC_ISTC:
-    /* ISTC: Copy D to A and take following JMP instruction if D is true. */
-    TRACE("ISTC");
-  case BC_ISFC:
-    /* ISFC: Copy D to A and take following JMP instruction if D is false. */
-    if (OP == BC_ISFC)
-      TRACE("ISFC");
-    {
-      int flag = (OP == BC_ISFC); // Invert flag on ISFC.
-      BASE[A] = BASE[D];
-      flag ^= tvistruecond(BASE+D);
-      curins = *PC++;
-      if (flag) branchPC(D);
-    }
-    break;
-  case BC_IST:
-    /* IST: Take following JMP instruction if D is true. */
-    TRACE("IST");
-    {
-      int flag = tvistruecond(BASE+D);
-      /* Advance to jump instruction. */
-      curins = *PC++;
-      if (flag) branchPC(D);
-    }
-    break;
-  case BC_ISF:
-    TRACE("ISF");
-    {
-      int flag = !tvistruecond(BASE+D);
-      /* Advance to jump instruction. */
-      curins = *PC++;
-      if (flag) branchPC(D);
-    }
-    break;
-  case BC_ISTYPE:
-    /* ISTYPE: assert A is of type -D. */
-    TRACE("ISTYPE");
-    if (itype(BASE+A) != -D) {
-      vm_savepc(L, PC);
-      lj_meta_istype(L, A, D);
-    }
-    break;
-  case BC_ISNUM:
-    /* ISNUM: assert A is a number. */
-    TRACE("ISNUM");
-    if (!tvisnum(BASE+A)) {
-      vm_savepc(L, PC);
-      lj_meta_istype(L, A, D);
-    }
-    break;
-  case BC_MOV:
-    TRACE("MOV");
-    /* MOV: A = dst; D = src */
-    copyTV(L, BASE+A, BASE+D);
-    break;
-  case BC_NOT:
-    /* NOT: Set A to boolean not of D. */
-    TRACE("NOT");
-    setboolV(BASE+A, !tvistruecond(BASE+D));
-    break;
-  case BC_UNM:
-    /* UNM: Set A to -D (unary minus). */
+  TRACE(OP < BC__MAX ? bc_names[OP] : "ASMFF");
+  TAILCALL ((lj_vm_func *)disp)[OP](VM_FUNC_ARGS);
+}
+
+#define DISPATCH lj_vm_func_dispatch(VM_FUNC_ARGS)
+
+static inline void vm_pause(BCIns curins, const BCIns *_pc, void *disp,
+                        lua_State *L,
+                        unsigned int _multres, unsigned int _nargs,
+                        void *_kbase,
+                        lua_State *_cont_L, TValue *_cont_base, ptrdiff_t _cont_ofs) {
+  multres = _multres;
+  nargs = _nargs;
+  kbase = _kbase;
+  pc = _pc;
+  cont_L = _cont_L;
+  cont_base = _cont_base;
+  cont_ofs = _cont_ofs;
+}
+
+#define VM_PAUSE vm_pause(VM_FUNC_ARGS)
+
+static inline void vm_resume (BCIns curins, const BCIns *_pc, void *disp,
+                        lua_State *L,
+                        unsigned int _multres, unsigned int _nargs,
+                        void *_kbase,
+                        lua_State *_cont_L, TValue *_cont_base, ptrdiff_t _cont_ofs) {
+  TAILCALL DISPATCH;
+}
+
+#define VM_RESUME vm_resume(VM_FUNC_ARGS)
+
+VM_FUNC(IScc) {
+  /* ISLT: Take following JMP instruction if A < D. */
+  /* ISGE: Take following JMP instruction if A >= D. */
+  /* ISLE: Take following JMP instruction if A <= D. */
+  /* ISGT: Take following JMP instruction if A > D. */
+  int flag = 0;
+  if (tvisnum(BASE+A) && tvisnum(BASE+D)) {
+    double x = BASE[A].n, y = BASE[D].n;
+    /* Compare two floats.
+      *
+      * Note: to preserve NaN semantics GE/GT branch on unordered, but LT/LE
+      * don't.
+      */
+    if (OP == BC_ISLT)
+      flag = x < y;
+    else if (OP == BC_ISGE)
+      flag = x >= y || isnan(x) || isnan(y);
+    else if (OP == BC_ISLE)
+      flag = x <= y;
+    else if (OP == BC_ISGT)
+      flag = x > y || isnan(x) || isnan(y);
+  } else {
+    /* Fall back to meta-comparison. */
     vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+D, BASE+D, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
+    TValue *res = lj_meta_comp(L, BASE+A, BASE+D, OP);
+    if ((intptr_t)res > 1) {
+      VM_PAUSE;
+      vm_call_cont(L, res, 2);
+      TAILCALL VM_RESUME;
+    } else
+      flag = (intptr_t)res == 1;
+  }
+  /* Advance to jump instruction. */
+  curins = *PC++;
+  if (flag) branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(ISccV) {
+  /* ISEQV: Take following JMP instruction if A is equal to D. */
+  /* ISNEV: Take following JMP instruction if A is not equal to D. */
+  TValue *x = BASE+A; TValue *y = BASE+D;
+  int flag = (OP == BC_ISNEV); // Invert flag on ISNEV.
+  if (tvisnum(x) && tvisnum(y))
+    flag ^= (x->n == y->n);
+  else if (tviscdata(x) || tviscdata(y)) {
+    // Either object is cdata.
+    vm_savepc(L, (BCIns*)((intptr_t)PC-4));
+    TValue *res = lj_meta_equal_cd(L, curins);
+    if ((intptr_t)res > 1) {
+      VM_PAUSE;
+      vm_call_cont(L, res, 2);
+      TAILCALL VM_RESUME;
+    } else
+      flag = (intptr_t)res;
+  } else if (x->u64 == y->u64)
+    // Same GCobjs or pvalues?
+    flag ^= 1;
+  else if (itype(x) != itype(y))
+    // Not the same type?
+    flag = flag;
+  else if (itype(x) <= LJ_TISTABUD) {
+    // Different tables or userdatas. Need to check __eq metamethod.
+    vm_savepc(L, (BCIns*)((intptr_t)PC-4));
+    TValue *res = lj_meta_equal(L, gcval(BASE+A), gcval(BASE+D), flag);
+    if ((intptr_t)res != flag) {
+      VM_PAUSE;
+      vm_call_cont(L, res, 2);
+      TAILCALL VM_RESUME;
     }
-    break;
-  case BC_LEN:
-    /* LEN: Set A to #D (object length). */
-    TRACE("LEN");
-    {
-      TValue *dst = BASE+A;
-      TValue *o = BASE+D;
-      if (tvisstr(o))
-        setnumV(dst, strV(o)->len);
-      else if (tvistab(o)) {
-        /* Lua 5.1 does not support __len on tables. */
-        setnumV(dst, lj_tab_len(tabV(o)));
-      } else {
-        vm_savepc(L, PC);
-        vm_call_cont(L, lj_meta_len(L, o), 1);
-      }
-    }
-    break;
-  case BC_ADDVN:
-    /* ADDVN: Add number constant C to B and store the result in A. */
-    TRACE("ADDVN");
+  }
+  curins = *PC++;
+  if (flag) branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(ISccS) {
+  /* ISEQS: Take following JMP instruction if A is equal to string D. */
+  /* ISNES: Take following JMP instruction if A is not equal to string D. */
+  int flag = (OP == BC_ISNES); // Invert flag on ISNES.
+  if (tvisstr(BASE+A))
+    flag ^= (strV(BASE+A) == kgcref(D, GCstr));
+  else if (tviscdata(BASE+A)) {
+    vm_savepc(L, (BCIns*)((intptr_t)PC-4));
+    TValue *res = lj_meta_equal_cd(L, curins);
+    if ((intptr_t)res > 1) {
+      VM_PAUSE;
+      vm_call_cont(L, res, 2);
+      TAILCALL VM_RESUME;
+    } else
+      flag = (intptr_t)res;
+  }
+  curins = *PC++;
+  if (flag) branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(ISccN) {
+  /* ISEQN: Take following JMP if A is equal to number constant D. */
+  /* ISNEN: Take following JMP if A is not equal to number constant D. */
+  int flag = (OP == BC_ISNEN); // Invert flag on ISNEN.
+  if (tvisnum(BASE+A))
+    flag ^= numV(BASE+A) == numV(ktv(D));
+  else if (tviscdata(BASE+A)) {
+    vm_savepc(L, (BCIns*)((intptr_t)PC-4));
+    TValue *res = lj_meta_equal_cd(L, curins);
+    if ((intptr_t)res > 1) {
+      VM_PAUSE;
+      vm_call_cont(L, res, 2);
+      TAILCALL VM_RESUME;
+    } else
+      flag = (intptr_t)res;
+  }
+  curins = *PC++;
+  if (flag) branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(ISccP) {
+  /* ISEQP: Take following JMP if A is equal to primtive D.*/
+  /* ISNEP: Take following JMP unless A is equal to primtive D.*/
+  int flag = (OP == BC_ISNEP); // Invert flag on ISNEP.
+  if (itype(BASE+A) == ~D)
+    /* If the types match than A is nil/false/true and equal to pri D. */
+    flag ^= 1;
+  else if (tviscdata(BASE+A)) {
+    vm_savepc(L, (BCIns*)((intptr_t)PC-4));
+    TValue *res = lj_meta_equal_cd(L, curins);
+    if ((intptr_t)res > 1) {
+      VM_PAUSE;
+      vm_call_cont(L, res, 2);
+      TAILCALL VM_RESUME;
+    } else
+      flag = (intptr_t)res;
+  }
+  curins = *PC++;
+  if (flag) branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(ISbC) {
+  /* ISTC: Copy D to A and take following JMP instruction if D is true. */
+  /* ISFC: Copy D to A and take following JMP instruction if D is false. */
+  int flag = (OP == BC_ISFC); // Invert flag on ISFC.
+  BASE[A] = BASE[D];
+  flag ^= tvistruecond(BASE+D);
+  curins = *PC++;
+  if (flag) branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(IST) {
+  /* IST: Take following JMP instruction if D is true. */
+  int flag = tvistruecond(BASE+D);
+  /* Advance to jump instruction. */
+  curins = *PC++;
+  if (flag) branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(ISF) {
+  /* ISF: Take following JMP instruction if D is false. */
+  int flag = !tvistruecond(BASE+D);
+  /* Advance to jump instruction. */
+  curins = *PC++;
+  if (flag) branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(ISTYPE) {
+  /* ISTYPE: assert A is of type -D. */
+  if (itype(BASE+A) != -D) {
     vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, ktv(C), OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_SUBVN:
-    /* SUBVN: Subtract number constant C from B and store the result in A. */
-    TRACE("SUBVN");
+    lj_meta_istype(L, A, D);
+  }
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(ISNUM) {
+  /* ISNUM: assert A is a number. */
+  if (!tvisnum(BASE+A)) {
     vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, ktv(C), OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_MULVN:
-    /* MULVN: Multiply B by number constant C and store the result in A. */
-    TRACE("MULVN");
+    lj_meta_istype(L, A, D);
+  }
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(MOV) {
+  /* MOV: A = dst; D = src */
+  copyTV(L, BASE+A, BASE+D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(NOT) {
+  /* NOT: Set A to boolean not of D. */
+  setboolV(BASE+A, !tvistruecond(BASE+D));
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(UNM) {
+  /* UNM: Set A to -D (unary minus). */
+  vm_savepc(L, PC);
+  TValue *mbase = lj_meta_arith(L, BASE+A, BASE+D, BASE+D, OP);
+  if (mbase) vm_call_cont(L, mbase, 2);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(LEN) {
+  /* LEN: Set A to #D (object length). */
+  TValue *dst = BASE+A;
+  TValue *o = BASE+D;
+  if (tvisstr(o))
+    setnumV(dst, strV(o)->len);
+  else if (tvistab(o)) {
+    /* Lua 5.1 does not support __len on tables. */
+    setnumV(dst, lj_tab_len(tabV(o)));
+  } else {
     vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, ktv(C), OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_DIVVN:
-    /* DIVVN: Divide B by number constant C and store the result in A. */
-    TRACE("DIVVN");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, ktv(C), OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_MODVN:
-    /* MODVN: Calculate B modulo number constant C and store the result in A. */
-    TRACE("MODVN");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, ktv(C), OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_ADDNV:
-    /* ADDNV: Add B to number constant C and store the result in A. */
-    TRACE("ADDNV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, ktv(C), BASE+B, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_SUBNV:
-    /* SUBNV: Subtract B from number constant C and store the result in A. */
-    TRACE("SUBNV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, ktv(C), BASE+B, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_MULNV:
-    /* MULNV: Multiply number constant C by B and store the result in A. */
-    TRACE("MULNV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, ktv(C), BASE+B, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_DIVNV:
-    /* DIVNV: Divide number constant C by B and store the result in A. */
-    TRACE("DIVNV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, ktv(C), BASE+B, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_MODNV:
-    /* MODNV: Calculate number constant C modulo B and store the result in A. */
-    TRACE("MODNV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, ktv(C), BASE+B, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_ADDVV:
-    /* ADDVV: Add C to B and store the result in A. */
-    TRACE("ADDVV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, BASE+C, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_SUBVV:
-    /* SUBVV: Subtract C from B and store the result in A. */
-    TRACE("SUBVV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, BASE+C, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_MULVV:
-    /* MULVV: Multiply B by C and store the result in A. */
-    TRACE("MULVV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, BASE+C, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_DIVVV:
-    /* DIVVV: Divide B by C and store the result in A. */
-    TRACE("DIVVV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, BASE+C, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_MODVV:
-    /* MODVV: Calculate B modulo C and store the result in A. */
-    TRACE("MODVV");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, BASE+C, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_POW:
-    /* POW: Calculate power C of B and store the result in A. */
-    TRACE("POW");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, BASE+C, OP);
-      if (mbase) vm_call_cont(L, mbase, 2);
-    }
-    break;
-  case BC_CAT:
-    TRACE("CAT");
-    vm_savepc(L, PC);
-    {
-      TValue *mbase = lj_meta_cat(L, BASE+C, C-B);
-      if (mbase) vm_call_cont(L, mbase, 2);
-      else copyTV(L, BASE+A, BASE+B);
-    }
-    break;
-  case BC_KSTR:
-    TRACE("KSTR");
-    setgcVraw(BASE+A, kgcref(D, GCobj), LJ_TSTR);
-    break;
-  case BC_KCDATA:
-    /* KCDATA: Set A to cdata constant D. */
-    TRACE("KCDATA");
-    setcdataV(L, BASE+A, kgcref(D, GCcdata));
-    break;
-  case BC_KSHORT:
-    TRACE("KSHORT");
-    /* BASE[A] = D */
-    setnumV(BASE+A, (int16_t) D); // D is a signed int16 literal.
-    break;
-  case BC_KNUM:
-    /* KNUM: Set slot A to number constant D. */
-    TRACE("KNUM");
-    setnumV(BASE+A, ktv(D)->n);
-    break;
-  case BC_KPRI:
-    TRACE("KPRI");
-    setpriV(BASE+A, ~D); // D is 0/1/2 for nil/false/true.
-    break;
-  case BC_KNIL:
-    /* KNIL: Set slots A to D to nil. */
-    TRACE("KNIL");
-    copyTVs(L, BASE+A, NULL, 1+D - A, 0);
-    break;
-  case BC_UGET:
-    TRACE("UGET");
-    {
-      GCfuncL *parent = &(funcV(BASE-2)->l);
-      BASE[A] = *mref(parent->uvptr[D]->uv.v, TValue);
-    }
-    break;
-  case BC_USETV:
-    /* USETV: Set upvalue A to D. */
-    TRACE("USETV");
-    {
-      GCfuncL *parent = &(funcV(BASE-2)->l);
-      GCupval *uv = &parent->uvptr[A]->uv;
-      TValue *v = (TValue *)uv->v;
-      copyTV(L, v, BASE+D);
-      // Upvalue closed, marked black, and new value is collectable and white?
-      if (uv->closed && (uv->marked & LJ_GC_BLACK)
-          && tvisgcv(v) && iswhite(gcval(v)))
-        // Crossed a write barrier. Move the barrier forward.
-        lj_gc_barrieruv(G(L), v);
-    }
-    break;
-  case BC_USETS:
-    /* USETS: Set upvalue A to string constant D. */
-    TRACE("USETS");
-    {
-      GCfuncL *parent = &(funcV(BASE-2)->l);
-      GCupval *uv = &parent->uvptr[A]->uv;
-      TValue *v = (TValue *)uv->v;
-      GCobj *o = kgcref(D, GCobj);
-      setgcVraw(v, o, LJ_TSTR);
-      // Upvalue closed, marked black, and new value is white?
-      if (uv->closed && (uv->marked & LJ_GC_BLACK) && iswhite(o))
-        // Crossed a write barrier. Move the barrier forward.
-        lj_gc_barrieruv(G(L), v);
-    }
-    break;
-  case BC_USETN:
-    /* USETN: Set upvalue A to number constant D. */
-    TRACE("USETN");
-    {
-      GCfuncL *parent = &(funcV(BASE-2)->l);
-      GCupval *uv = &parent->uvptr[A]->uv;
-      TValue *v = (TValue *)uv->v;
-      setnumV(v, numV(ktv(D)));
-    }
-    break;
-  case BC_USETP:
-    /* USETP: Set upvalue A to primitive D. */
-    TRACE("USETP");
-    {
-      GCfuncL *parent = &(funcV(BASE-2)->l);
-      GCupval *uv = &parent->uvptr[A]->uv;
-      TValue *v = (TValue *)uv->v;
-      setpriV(v, ~D);
-    }
-    break;
-  case BC_UCLO:
-    /* UCLO: Close upvalues for slots ≥ rbase and jump to target D. */
-    TRACE("UCLO");
-    if (L->openupval > (GCRef)0)
-      lj_func_closeuv(L, BASE+A);
+    vm_call_cont(L, lj_meta_len(L, o), 1);
+  }
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(arithVN) {
+  /* ADDVN: Add number constant C to B and store the result in A. */
+  /* SUBVN: Subtract number constant C from B and store the result in A. */
+  /* MULVN: Multiply B by number constant C and store the result in A. */
+  /* DIVVN: Divide B by number constant C and store the result in A. */
+  /* MODVN: Calculate B modulo number constant C and store the result in A. */
+  vm_savepc(L, PC);
+  TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, ktv(C), OP);
+  if (mbase) vm_call_cont(L, mbase, 2);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(arithNV) {
+  /* ADDNV: Add B to number constant C and store the result in A. */
+  /* SUBNV: Subtract B from number constant C and store the result in A. */
+  /* MULNV: Multiply number constant C by B and store the result in A. */
+  /* DIVNV: Divide number constant C by B and store the result in A. */
+  /* MODNV: Calculate number constant C modulo B and store the result in A. */
+  vm_savepc(L, PC);
+  TValue *mbase = lj_meta_arith(L, BASE+A, ktv(C), BASE+B, OP);
+  if (mbase) vm_call_cont(L, mbase, 2);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(arithVV) {
+  /* ADDVV: Add C to B and store the result in A. */
+  /* SUBVV: Subtract C from B and store the result in A. */
+  /* MULVV: Multiply B by C and store the result in A. */
+  /* DIVVV: Divide B by C and store the result in A. */
+  /* MODVV: Calculate B modulo C and store the result in A. */
+  /* POW: Calculate power C of B and store the result in A. */
+  vm_savepc(L, PC);
+  TValue *mbase = lj_meta_arith(L, BASE+A, BASE+B, BASE+C, OP);
+  if (mbase) vm_call_cont(L, mbase, 2);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(CAT) {
+  /* CAT: Concatenate all values in variable slots B to C inclusive. */
+  vm_savepc(L, PC);
+  TValue *mbase = lj_meta_cat(L, BASE+C, C-B);
+  if (mbase) vm_call_cont(L, mbase, 2);
+  else copyTV(L, BASE+A, BASE+B);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(KSTR) {
+  setgcVraw(BASE+A, kgcref(D, GCobj), LJ_TSTR);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(KCDATA) {
+  /* KCDATA: Set A to cdata constant D. */
+  setcdataV(L, BASE+A, kgcref(D, GCcdata));
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(KSHORT) {
+  /* BASE[A] = D */
+  setnumV(BASE+A, (int16_t) D); // D is a signed int16 literal.
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(KNUM) {
+  /* KNUM: Set slot A to number constant D. */
+  setnumV(BASE+A, ktv(D)->n);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(KPRI) {
+  /* KPRI: Set A to primitive D. */
+  setpriV(BASE+A, ~D); // D is 0/1/2 for nil/false/true.
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(KNIL) {
+  /* KNIL: Set slots A to D to nil. */
+  copyTVs(L, BASE+A, NULL, 1+D - A, 0);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(UGET) {
+  /* UGET: 	Set A to upvalue D. */
+  GCfuncL *parent = &(funcV(BASE-2)->l);
+  BASE[A] = *mref(parent->uvptr[D]->uv.v, TValue);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(USETV) {
+  /* USETV: Set upvalue A to D. */
+  GCfuncL *parent = &(funcV(BASE-2)->l);
+  GCupval *uv = &parent->uvptr[A]->uv;
+  TValue *v = (TValue *)uv->v;
+  copyTV(L, v, BASE+D);
+  // Upvalue closed, marked black, and new value is collectable and white?
+  if (uv->closed && (uv->marked & LJ_GC_BLACK)
+      && tvisgcv(v) && iswhite(gcval(v)))
+    // Crossed a write barrier. Move the barrier forward.
+    lj_gc_barrieruv(G(L), v);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(USETS) {
+  /* USETS: Set upvalue A to string constant D. */
+  GCfuncL *parent = &(funcV(BASE-2)->l);
+  GCupval *uv = &parent->uvptr[A]->uv;
+  TValue *v = (TValue *)uv->v;
+  GCobj *o = kgcref(D, GCobj);
+  setgcVraw(v, o, LJ_TSTR);
+  // Upvalue closed, marked black, and new value is white?
+  if (uv->closed && (uv->marked & LJ_GC_BLACK) && iswhite(o))
+    // Crossed a write barrier. Move the barrier forward.
+    lj_gc_barrieruv(G(L), v);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(USETN) {
+  /* USETN: Set upvalue A to number constant D. */
+  GCfuncL *parent = &(funcV(BASE-2)->l);
+  GCupval *uv = &parent->uvptr[A]->uv;
+  TValue *v = (TValue *)uv->v;
+  setnumV(v, numV(ktv(D)));
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(USETP) {
+  /* USETP: Set upvalue A to primitive D. */
+  GCfuncL *parent = &(funcV(BASE-2)->l);
+  GCupval *uv = &parent->uvptr[A]->uv;
+  TValue *v = (TValue *)uv->v;
+  setpriV(v, ~D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(UCLO) {
+  /* UCLO: Close upvalues for slots ≥ rbase and jump to target D. */
+  if (L->openupval > (GCRef)0)
+    lj_func_closeuv(L, BASE+A);
+  branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(FNEW) {
+  /* FNEW: Create new closure from prototype D and store it in A. */
+  vm_savepc(L, PC);
+  GCproto *pt = kgcref(D, GCproto);
+  GCfuncL *parent = &(funcV(BASE-2)->l);
+  GCfunc *fn = lj_func_newL_gc(L, pt, parent);
+  setgcVraw(BASE+A, (GCobj*)fn, LJ_TFUNC);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TNEW) {
+  /* TNEW: Set A to new table with size D. */
+  vm_savepc(L, PC);
+  lj_gc_check(L);
+  uint32_t asize = D & ((1<<11)-1);
+  uint32_t hbits = D >> 11;
+  GCtab *tab = lj_tab_new(L, asize, hbits);
+  setgcVraw(BASE+A, (GCobj*)tab, LJ_TTAB);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TDUP) {
+  /* TDUP: 	Set A to duplicated template table D. */
+  vm_savepc(L, PC);
+  lj_gc_check(L);
+  GCtab *tab = lj_tab_dup(L, kgcref(D, GCtab));
+  setgcVraw(BASE+A, (GCobj*)tab, LJ_TTAB);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(GGET) {
+  /* GGET: A = _G[D] */
+  vm_savepc(L, PC);
+  GCfunc *fn = funcV(BASE-2);
+  TValue e, k;
+  const TValue *v;
+  setgcVraw(&e, fn->l.env, LJ_TTAB);
+  setgcVraw(&k, kgcref(D, GCobj), LJ_TSTR);
+  v = lj_meta_tget(L, &e, &k);
+  if (v)
+    copyTV(L, BASE+A, v);
+  else
+    vm_call_cont(L, TOP, 2);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(GSET) {
+  /* GSET: _G[D] = A */
+  vm_savepc(L, PC);
+  GCfunc *fn = funcV(BASE-2);
+  TValue e, k, *v;
+  setgcVraw(&e, fn->l.env, LJ_TTAB);
+  setgcVraw(&k, kgcref(D, GCobj), LJ_TSTR);
+  v = lj_meta_tset(L, &e, &k);
+  if (v) {
+    copyTV(L, v, BASE+A);
+  } else {
+    copyTV(L, TOP+2, BASE+A); /* Copy value to third argument. */
+    vm_call_cont(L, TOP, 3);
+  }
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TGETV) {
+  /* TGETV: A = B[C] */
+  vm_savepc(L, PC);
+  const TValue *v = lj_meta_tget(L, BASE+B, BASE+C);
+  if (v)
+    copyTV(L, BASE+A, v);
+  else
+    vm_call_cont(L, TOP, 2);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TGETS) {
+  /* TGETS: A = B[C] where C is a string constant. */
+  vm_savepc(L, PC);
+  TValue k;
+  const TValue *v;
+  setgcVraw(&k, kgcref(C, GCobj), LJ_TSTR);
+  v = lj_meta_tget(L, BASE+B, &k);
+  if (v)
+    copyTV(L, BASE+A, v);
+  else
+    vm_call_cont(L, TOP, 2);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TGETB) {
+  /* TGETB: A = B[C] where C is a byte literal. */
+  vm_savepc(L, PC);
+  TValue k;
+  const TValue *v;
+  k.n = C;
+  v = lj_meta_tget(L, BASE+B, &k);
+  if (v)
+    copyTV(L, BASE+A, v);
+  else
+    vm_call_cont(L, TOP, 2);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TGETR) {
+  /* TGETR: A = B[C]  (__index is ignored). */
+  copyTV(L, BASE+A, lj_tab_getint(tabV(BASE+B), (int32_t)numV(BASE+C)));
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TSETV) {
+  /* TSETV: B[C] = A */
+  vm_savepc(L, PC);
+  TValue *v = lj_meta_tset(L, BASE+B, BASE+C);
+  if (v) {
+    copyTV(L, v, BASE+A);
+  } else {
+    copyTV(L, TOP+2, BASE+A); /* Copy value to third argument. */
+    vm_call_cont(L, TOP, 3);
+  }
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TSETS) {
+  /* TSETS: B[C] = A */
+  vm_savepc(L, PC);
+  TValue k, *v;
+  setgcVraw(&k, kgcref(C, GCobj), LJ_TSTR);
+  v = lj_meta_tset(L, BASE+B, &k);
+  if (v) {
+    copyTV(L, v, BASE+A);
+  } else {
+    copyTV(L, TOP+2, BASE+A); /* Copy value to third argument. */
+    vm_call_cont(L, TOP, 3);
+  }
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TSETB) {
+  /* TSETB: B[C] = A where C is an unsigned literal. */
+  vm_savepc(L, PC);
+  TValue k, *v;
+  k.n = C;
+  v = lj_meta_tset(L, BASE+B, &k);
+  if (v) {
+    copyTV(L, v, BASE+A);
+  } else {
+    copyTV(L, TOP+2, BASE+A); /* Copy value to third argument. */
+    vm_call_cont(L, TOP, 3);
+  }
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TSETM) {
+  /* TSETM: (A-1)[D], (A-1)[D+1], ... = A, A+1, ... */
+  vm_savepc(L, PC);
+  unsigned int i = 0, ix = ktv(D)->u32.lo;
+  TValue *o = BASE+A-1;
+  GCtab *tab = tabV(o);
+  if (tab->asize < ix+MULTRES)
+    lj_tab_reasize(L, tab, ix + MULTRES);
+  for (i = 0; i < MULTRES; i++)
+    *arrayslot(tab, ix+i) = BASE[A+i];
+  lj_gc_anybarriert(L, tab);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(TSETR) {
+  /* TSETR: B[C] = A (__newindex is ignored.) */
+  vm_savepc(L, PC);
+  copyTV(L, lj_tab_setint(L, tabV(BASE+B), (int32_t)numV(BASE+C)), BASE+A);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(CALL) {
+  /* CALLM: A = newbase, B = nresults+1, C = extra_nargs */
+  /* CALL: A = newbase, B = nresults+1, C = nargs+1 */
+  NARGS = OP == BC_CALL ? C-1 : C+MULTRES; /* nargs in MULTRES */
+  /* Notes:
+   *
+   * PC is 32-bit aligned and so the low bits are always 00 which
+   * corresponds to the FRAME_LUA tag value.
+   *
+   * CALL does not have to record the number of expected results
+   * in the frame data. The callee's RET bytecode will locate this
+   * CALL and read the value from the B operand. */
+  VM_PAUSE;
+  vm_call(L, BASE+2+A, NARGS, FRAME_LUA);
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(CALLT) {
+  /* CALLMT: Tailcall A(A+1, ..., A+D+MULTRES) */
+  /* CALLT: Tailcall A(A+1, ..., A+D-1). */
+  NARGS = OP == BC_CALLT ? D-1 : D+MULTRES; /* nargs in MULTRES */
+  MULTRES = NARGS;
+  VM_PAUSE;
+  vm_callt(L, A, NARGS);
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(ITERC) {
+  /* ITERC: Call iterator: A, A+1, A+2 = A-3, A-2, A-1; A, ..., A+B-2 = A(A+1, A+2). */
+  TValue *fb = BASE+A+2;
+  fb[0] = fb[-4]; // Copy state.
+  fb[1] = fb[-3]; // Copy control var.
+  fb[-2] = fb[-5]; // Copy callable.
+  VM_PAUSE;
+  vm_call(L, fb, 2, FRAME_LUA);
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(ITERN) {
+  /* ITERN: Specialized ITERC, if iterator function A-3 is next(). */
+  // NYI: add hotloop, record BC_ITERN.
+  GCtab *tab = tabV(BASE + A-2);
+  TValue *state = BASE + A-1;
+  TValue *key = BASE + A+0;
+  TValue *val = BASE + A+1;
+  unsigned int i = state->i;
+  /* Advance to ITERL instruction. */
+  curins = *PC++;
+  /* Traverse array part. */
+  while (i < tab->asize) {
+    cTValue *entry = arrayslot(tab, i);
+    if (tvisnil(entry) && ++i) continue; // Skip holes in array part.
+    /* Return array index as a numeric key. */
+    setnumV(key, i);
+    /* Copy array slot to returned value. */
+    *val = *entry;
+    /* Update control var. */
+    state->i = i+1;
+    goto itern_next;
+  }
+  /* Traverse hash part. */
+  i -= tab->asize;
+  while (i <= tab->hmask) {
+    Node *n = &noderef(tab->node)[i];
+    if (tvisnil(&n->val) && ++i) continue; // Skip holes in hash part.
+    /* Copy key and value from hash slot. */
+    *key = n->key;
+    *val = n->val;
+    /* Update control var. */
+    state->i = tab->asize + i+1;
+    goto itern_next;
+  }
+  goto itern_end;
+itern_next:
+  /* Iterate: branch to target from ITERL. */
+  branchPC(D);
+itern_end:
+  /* End of iteration: advance to ITERL+1. */
+  { TAILCALL DISPATCH; }
+}
+
+VM_FUNC(VARG) {
+  /* VARG: Vararg: A, ..., A+B-2 = ... */
+  int delta = BASE[-1].u64 >> 3;
+  MULTRES = max(delta-2-(int)C, 0);
+  copyTVs(L, BASE+A, BASE-delta+C, B>0 ? B-1 : MULTRES, MULTRES);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(ISNEXT) {
+  /* ISNEXT: Verify ITERN specialization and jump. */
+  TValue *fn = BASE + A-3;
+  TValue *tab = BASE + A-2;
+  TValue *nil = BASE + A-1;
+  branchPC(D);
+  if (tvisfunc(fn)
+      && funcV(fn)->c.ffid == FF_next_N
+      && tvistab(tab)
+      && tvisnil(nil))
+    BASE[A-1].u64 = U64x(fffe7fff, 00000000); // Initialize control var.
+  else
+    /* Despecialize bytecode if any of the checks fail. */
+    setbc_op(PC, BC_ITERC);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(RETM) {
+  /* RETM: return A, ..., A+D+MULTRES-1 */
+  VM_PAUSE;
+  if (vm_return(L, BASE[-1].u64, A, D+MULTRES)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(RET) {
+  /* RET: return A, ..., A+D-2 */
+  VM_PAUSE;
+  if (vm_return(L, BASE[-1].u64, A, D-1)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(RET0) {
+  /* RET0: return */
+  VM_PAUSE;
+  if (vm_return(L, BASE[-1].u64, A, 0)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(RET1) {
+  /* RET1: return A */
+  VM_PAUSE;
+  if (vm_return(L, BASE[-1].u64, A, 1)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(FORI) {
+  /* FORI: Numeric 'for' loop init. */
+  /* JFORI: Numeric 'for' loop init, JIT-compiled. */
+  vm_savepc(L, PC);
+  TValue *state = BASE + A;
+  TValue *idx = state, *stop = state+1, *step = state+2, *ext = state+3;
+  /* Initialize loop parameters. */
+  lj_meta_for(L, state);
+  /* Copy loop index to stack. */
+  setnumV(ext, idx->n);
+  /* Check for termination */
+  if ((step->n >= 0 && idx->n > stop->n) ||
+      (step->n <  0 && stop->n > idx->n)) {
     branchPC(D);
-    break;
-  case BC_FNEW:
-    TRACE("FNEW");
-    vm_savepc(L, PC);
-    {
-      GCproto *pt = kgcref(D, GCproto);
-      GCfuncL *parent = &(funcV(BASE-2)->l);
-      GCfunc *fn = lj_func_newL_gc(L, pt, parent);
-      setgcVraw(BASE+A, (GCobj*)fn, LJ_TFUNC);
-    }
-    break;
-  case BC_TNEW:
-    TRACE("TNEW");
-    vm_savepc(L, PC);
-    lj_gc_check(L);
-    {
-      uint32_t asize = D & ((1<<11)-1);
-      uint32_t hbits = D >> 11;
-      GCtab *tab = lj_tab_new(L, asize, hbits);
-      setgcVraw(BASE+A, (GCobj*)tab, LJ_TTAB);
-    }
-    break;
-  case BC_TDUP:
-    TRACE("TDUP");
-    vm_savepc(L, PC);
-    lj_gc_check(L);
-    {
-      GCtab *tab = lj_tab_dup(L, kgcref(D, GCtab));
-      setgcVraw(BASE+A, (GCobj*)tab, LJ_TTAB);
-    }
-    break;
-  case BC_GGET:
-    TRACE("GGET");
-    /* A = _G[D] */
-    vm_savepc(L, PC);
-    {
-      GCfunc *fn = funcV(BASE-2);
-      TValue e, k;
-      const TValue *v;
-      setgcVraw(&e, fn->l.env, LJ_TTAB);
-      setgcVraw(&k, kgcref(D, GCobj), LJ_TSTR);
-      v = lj_meta_tget(L, &e, &k);
-      if (v)
-        copyTV(L, BASE+A, v);
-      else
-        vm_call_cont(L, TOP, 2);
-    }
-    break;
-  case BC_GSET:
-    /* _G[D] = A */
-    TRACE("GSET");
-    vm_savepc(L, PC);
-    {
-      GCfunc *fn = funcV(BASE-2);
-      TValue e, k, *v;
-      setgcVraw(&e, fn->l.env, LJ_TTAB);
-      setgcVraw(&k, kgcref(D, GCobj), LJ_TSTR);
-      v = lj_meta_tset(L, &e, &k);
-      if (v) {
-        copyTV(L, v, BASE+A);
-      } else {
-        copyTV(L, TOP+2, BASE+A); /* Copy value to third argument. */
-        vm_call_cont(L, TOP, 3);
-      }
-    }
-    break;
-  case BC_TGETV:
-    /* TGETV: A = B[C] */
-    TRACE("TGETV");
-    vm_savepc(L, PC);
-    {
-      const TValue *v = lj_meta_tget(L, BASE+B, BASE+C);
-      if (v)
-        copyTV(L, BASE+A, v);
-      else
-        vm_call_cont(L, TOP, 2);
-    }
-    break;
-  case BC_TGETS:
-    /* TGETS: A = B[C] where C is a string constant. */
-    TRACE("TGETS");
-    vm_savepc(L, PC);
-    {
-      TValue k;
-      const TValue *v;
-      setgcVraw(&k, kgcref(C, GCobj), LJ_TSTR);
-      v = lj_meta_tget(L, BASE+B, &k);
-      if (v)
-        copyTV(L, BASE+A, v);
-      else
-        vm_call_cont(L, TOP, 2);
-    }
-    break;
-  case BC_TGETB:
-    /* TGETB: A = B[C] where C is a byte literal. */
-    TRACE("TGETB");
-    vm_savepc(L, PC);
-    {
-      TValue k;
-      const TValue *v;
-      k.n = C;
-      v = lj_meta_tget(L, BASE+B, &k);
-      if (v)
-        copyTV(L, BASE+A, v);
-      else
-        vm_call_cont(L, TOP, 2);
-    }
-    break;
-  case BC_TGETR:
-    /* TGETR: A = B[C]  (__index is ignored). */
-    TRACE("TGETR");
-    copyTV(L, BASE+A, lj_tab_getint(tabV(BASE+B), (int32_t)numV(BASE+C)));
-    break;
-  case BC_TSETV:
-    TRACE("TSETV");
-    vm_savepc(L, PC);
-    {
-      TValue *v = lj_meta_tset(L, BASE+B, BASE+C);
-      if (v) {
-        copyTV(L, v, BASE+A);
-      } else {
-        copyTV(L, TOP+2, BASE+A); /* Copy value to third argument. */
-        vm_call_cont(L, TOP, 3);
-      }
-    }
-    break;
-  case BC_TSETS:
-    TRACE("TSETS");
-    vm_savepc(L, PC);
-    {
-      TValue k, *v;
-      setgcVraw(&k, kgcref(C, GCobj), LJ_TSTR);
-      v = lj_meta_tset(L, BASE+B, &k);
-      if (v) {
-        copyTV(L, v, BASE+A);
-      } else {
-        copyTV(L, TOP+2, BASE+A); /* Copy value to third argument. */
-        vm_call_cont(L, TOP, 3);
-      }
-      break;
-    }
-  case BC_TSETB:
-    /* TSETB: B[C] = A where C is an unsigned literal. */
-    TRACE("TSETB");
-    vm_savepc(L, PC);
-    {
-      TValue k, *v;
-      k.n = C;
-      v = lj_meta_tset(L, BASE+B, &k);
-      if (v) {
-        copyTV(L, v, BASE+A);
-      } else {
-        copyTV(L, TOP+2, BASE+A); /* Copy value to third argument. */
-        vm_call_cont(L, TOP, 3);
-      }
-    }
-    break;
-  case BC_TSETM:
-    TRACE("TSETM");
-    vm_savepc(L, PC);
-    {
-      unsigned int i = 0, ix = ktv(D)->u32.lo;
-      TValue *o = BASE+A-1;
-      GCtab *tab = tabV(o);
-      if (tab->asize < ix+MULTRES)
-        lj_tab_reasize(L, tab, ix + MULTRES);
-      for (i = 0; i < MULTRES; i++)
-        *arrayslot(tab, ix+i) = BASE[A+i];
-      lj_gc_anybarriert(L, tab);
-    }
-    break;
-  case BC_TSETR:
-    /* TGETR: B[C] = A (__newindex is ignored.) */
-    TRACE("TSETR");
-    vm_savepc(L, PC);
-    copyTV(L, lj_tab_setint(L, tabV(BASE+B), (int32_t)numV(BASE+C)), BASE+A);
-    break;
-  case BC_CALLM: case BC_CALL:
-    if (OP == BC_CALLM) {
-      /* CALLM: A = newbase, B = nresults+1, C = extra_nargs */
-      TRACE("CALLM");
-      NARGS = C+MULTRES; /* nargs in MULTRES */
-    } else if (OP == BC_CALL) {
-      /* CALL: A = newbase, B = nresults+1, C = nargs+1 */
-      TRACE("CALL");
-      NARGS = C-1;
-    }
-    {
-      /* Notes:
-       *
-       * PC is 32-bit aligned and so the low bits are always 00 which
-       * corresponds to the FRAME_LUA tag value.
-       *
-       * CALL does not have to record the number of expected results
-       * in the frame data. The callee's RET bytecode will locate this
-       * CALL and read the value from the B operand. */
-      vm_call(L, BASE+2+A, NARGS, FRAME_LUA);
-    }
-    break;
-  case BC_CALLMT: case BC_CALLT:
-    if (OP == BC_CALLMT) {
-      /* CALLMT: Tailcall A(A+1, ..., A+D+MULTRES) */
-      TRACE("CALLMT");
-      NARGS = D+MULTRES; /* nargs in MULTRES */
-    } else if (OP == BC_CALLT) {
-      /* CALLT: Tailcall A(A+1, ..., A+D-1). */
-      TRACE("CALLT");
-      NARGS = D-1;
-    }
-    {
-      MULTRES = NARGS;
-      vm_callt(L, A, NARGS);
-    }
-    break;
-  case BC_ITERC:
-    TRACE("ITERC");
-    {
-      TValue *fb = BASE+A+2;
-      fb[0] = fb[-4]; // Copy state.
-      fb[1] = fb[-3]; // Copy control var.
-      fb[-2] = fb[-5]; // Copy callable.
-      vm_call(L, fb, 2, FRAME_LUA);
-    }
-    break;
-  case BC_ITERN:
-    /* ITERN: Specialized ITERC, if iterator function A-3 is next(). */
-    TRACE("ITERN");
-    {
-      // NYI: add hotloop, record BC_ITERN.
-      GCtab *tab = tabV(BASE + A-2);
-      TValue *state = BASE + A-1;
-      TValue *key = BASE + A+0;
-      TValue *val = BASE + A+1;
-      unsigned int i = state->i;
-      /* Advance to ITERL instruction. */
-      curins = *PC++;
-      /* Traverse array part. */
-      while (i < tab->asize) {
-        cTValue *entry = arrayslot(tab, i);
-        if (tvisnil(entry) && ++i) continue; // Skip holes in array part.
-        /* Return array index as a numeric key. */
-        setnumV(key, i);
-        /* Copy array slot to returned value. */
-        *val = *entry;
-        /* Update control var. */
-        state->i = i+1;
-        goto itern_next;
-      }
-      /* Traverse hash part. */
-      i -= tab->asize;
-      while (i <= tab->hmask) {
-        Node *n = &noderef(tab->node)[i];
-        if (tvisnil(&n->val) && ++i) continue; // Skip holes in hash part.
-        /* Copy key and value from hash slot. */
-        *key = n->key;
-        *val = n->val;
-        /* Update control var. */
-        state->i = tab->asize + i+1;
-        goto itern_next;
-      }
-      goto itern_end;
-    itern_next:
-      /* Iterate: branch to target from ITERL. */
-      branchPC(D);
-    itern_end:
-      /* End of iteration: advance to ITERL+1. */
-      break;
-    }
-  case BC_VARG:
-    TRACE("VARG");
-    {
-      int delta = BASE[-1].u64 >> 3;
-      MULTRES = max(delta-2-(int)C, 0);
-      copyTVs(L, BASE+A, BASE-delta+C, B>0 ? B-1 : MULTRES, MULTRES);
-    }
-    break;
-  case BC_ISNEXT:
-    /* ISNEXT: Verify ITERN specialization and jump. */
-    TRACE("ISNEXT");
-    {
-      TValue *fn = BASE + A-3;
-      TValue *tab = BASE + A-2;
-      TValue *nil = BASE + A-1;
-      branchPC(D);
-      if (tvisfunc(fn)
-          && funcV(fn)->c.ffid == FF_next_N
-          && tvistab(tab)
-          && tvisnil(nil))
-        BASE[A-1].u64 = U64x(fffe7fff, 00000000); // Initialize control var.
-      else
-        /* Despecialize bytecode if any of the checks fail. */
-        setbc_op(PC, BC_ITERC);
-    }
-    break;
-  case BC_RETM:
-    TRACE("RETM");
-    if (vm_return(L, BASE[-1].u64, A, D+MULTRES)) return;
-    break;
-  case BC_RET:
-    TRACE("RET");
-    if (vm_return(L, BASE[-1].u64, A, D-1)) return;
-    break;
-  case BC_RET0:
-    TRACE("RET0");
-    if (vm_return(L, BASE[-1].u64, A, 0)) return;
-    break;
-  case BC_RET1:
-    TRACE("RET1");
-    if (vm_return(L, BASE[-1].u64, A, 1)) return;
-    break;
-  case BC_FORL:
-    TRACE("FORL");
+    TAILCALL DISPATCH;
+  } else if (OP == BC_JFORI) {
+    /* Always branch in JFORI. */
+    branchPC(D);
+    /* Continue with trace in found in JFORL bytecode. */
+    VM_PAUSE;
+    vm_exec_trace(L, bc_d(*(PC-1)));
+    TAILCALL VM_RESUME;
+  } else
+    TAILCALL DISPATCH;
+}
+
+VM_FUNC(FORL) {
+  /* FORL: Numeric 'for' loop */
+  /* JFORL: Numeric 'for' loop, jitted */
+  /* IFORL: Numeric 'for' loop, force interpreter */
+  if (OP == BC_FORL) {
+    VM_PAUSE;
     vm_hotloop(L);
-  case BC_JFORL:
-    if (OP == BC_JFORL) TRACE("JFORL");
-  case BC_IFORL:
-    if (OP == BC_IFORL) TRACE("IFORL");
-    {
-      TValue *state = BASE + A;
-      TValue *idx = state, *stop = state+1, *step = state+2, *ext = state+3;
-      if (OP == BC_JFORL) {
-        assert(tvisnum(stop));
-        assert(tvisnum(step));
-      } else if (!tvisnum(idx) || !tvisnum(stop) || !tvisnum(step))
-        lj_meta_for(L, state);
-      /* Update loop index. */
-      setnumV(idx, idx->n + step->n);
-      /* Copy loop index to stack. */
-      setnumV(ext, idx->n);
-      /* Check for termination */
-      if ((step->n >= 0 && idx->n <= stop->n) ||
-          (step->n <  0 && stop->n <= idx->n)) {
-        if (OP == BC_JFORL)
-          vm_exec_trace(L, D);
-        else
-          branchPC(D);
-      }
-    }
-    break;
-  case BC_JFORI:
-    TRACE("JFORI");
-  case BC_FORI:
-    if (OP == BC_FORI) TRACE("FORI");
-    vm_savepc(L, PC);
-    {
-      TValue *state = BASE + A;
-      TValue *idx = state, *stop = state+1, *step = state+2, *ext = state+3;
-      /* Initialize loop parameters. */
-      lj_meta_for(L, state);
-      /* Copy loop index to stack. */
-      setnumV(ext, idx->n);
-      /* Check for termination */
-      if ((step->n >= 0 && idx->n > stop->n) ||
-          (step->n <  0 && stop->n > idx->n)) {
-        branchPC(D);
-      } else if (OP == BC_JFORI) {
-        /* Always branch in JFORI. */
-        branchPC(D);
-        /* Continue with trace in found in JFORL bytecode. */
-        vm_exec_trace(L, bc_d(*(PC-1)));
-      }
-    }
-    break;
-  case BC_ITERL:
-    TRACE("ITERL");
-    vm_hotloop(L);
-  case BC_IITERL:
-    if (OP == BC_IITERL) TRACE("IITERL");
-    if (!tvisnil(BASE+A)) {
-      /* Save control var and branch. */
-      branchPC(D);
-      BASE[A-1] = *(BASE+A);
-    }
-    break;
-  case BC_JITERL:
-    TRACE("JITERL");
-    if (!tvisnil(BASE+A)) {
-      BASE[A-1] = *(BASE+A);
+  }
+  TValue *state = BASE + A;
+  TValue *idx = state, *stop = state+1, *step = state+2, *ext = state+3;
+  if (OP == BC_JFORL) {
+    assert(tvisnum(stop));
+    assert(tvisnum(step));
+  } else if (!tvisnum(idx) || !tvisnum(stop) || !tvisnum(step))
+    lj_meta_for(L, state);
+  /* Update loop index. */
+  setnumV(idx, idx->n + step->n);
+  /* Copy loop index to stack. */
+  setnumV(ext, idx->n);
+  /* Check for termination */
+  if ((step->n >= 0 && idx->n <= stop->n) ||
+      (step->n <  0 && stop->n <= idx->n)) {
+    if (OP == BC_JFORL) {
+      VM_PAUSE;
       vm_exec_trace(L, D);
+      TAILCALL VM_RESUME;
+    } else {
+      branchPC(D);
+      TAILCALL DISPATCH;
     }
-    break;
-  case BC_LOOP:
-    TRACE("LOOP");
+  } else
+    TAILCALL DISPATCH;
+}
+
+VM_FUNC(ITERL) {
+  /* ITERL: Iterator 'for' loop. */
+  /* IITERL: Iterator 'for' loop, force interpreter. */
+  if (OP == BC_ITERL) {
+    VM_PAUSE;
     vm_hotloop(L);
-  case BC_ILOOP:
-    if (OP == BC_ILOOP) TRACE("ILOOP");
-    break;
-  case BC_JLOOP:
-    TRACE("JLOOP");
+  }
+  if (!tvisnil(BASE+A)) {
+    /* Save control var and branch. */
+    branchPC(D);
+    BASE[A-1] = *(BASE+A);
+  }
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(JITERL) {
+  /* JITERL: Iterator 'for' loop, JIT-compiled. */
+  if (!tvisnil(BASE+A)) {
+    BASE[A-1] = *(BASE+A);
+    VM_PAUSE;
     vm_exec_trace(L, D);
-    break;
-  case BC_JMP:
-    TRACE("JMP");
-    branchPC(D);
-    break;
-  case BC_FUNCF:
-    TRACE("FUNCF");
+    TAILCALL VM_RESUME;
+  } else
+    TAILCALL DISPATCH;
+}
+
+VM_FUNC(LOOP) {
+  /* LOOP: Generic loop */
+  /* ILOOP: Generic loop, force interpreter */
+  /* JLOOP: Generic loop, JIT-compiled */
+  if (OP == BC_LOOP) {
+    VM_PAUSE;
+    vm_hotloop(L);
+  }
+  if (OP == BC_JLOOP) {
+    VM_PAUSE;
+    vm_exec_trace(L, D);
+    TAILCALL VM_RESUME;
+  } else
+    TAILCALL DISPATCH;
+}
+
+VM_FUNC(JMP) {
+  /* JMP: Jump */
+  branchPC(D);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(FUNCF) {
+  /* FUNCF: Fixed-arg Lua function */
+  /* IFUNCF: Fixed-arg Lua function, force interpreter */
+  /* JFUNCF: Fixed-arg Lua function, JIT-compiled */
+  if (OP == BC_FUNCF) {
+    VM_PAUSE;
     vm_hotcall(L);
-  case BC_IFUNCF:
-    if (OP == BC_IFUNCF) TRACE("IFUNCF");
-  case BC_JFUNCF:
-    if (OP == BC_JFUNCF) TRACE("JFUNCF");
-    {
-      GCproto *pt = (GCproto*)((intptr_t)(PC-1) - sizeof(GCproto));
-      TOP = BASE + A;
-      KBASE = mref(pt->k, void);
-      assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
-      /* Fill missing args with nil. */
-      if (A > NARGS) copyTVs(L, BASE+NARGS, NULL, A-NARGS, 0);
+  }
+  GCproto *pt = (GCproto*)((intptr_t)(PC-1) - sizeof(GCproto));
+  TOP = BASE + A;
+  KBASE = mref(pt->k, void);
+  assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
+  /* Fill missing args with nil. */
+  if (A > NARGS) copyTVs(L, BASE+NARGS, NULL, A-NARGS, 0);
+  if (OP == BC_JFUNCF) {
+    VM_PAUSE;
+    vm_exec_trace(L, D);
+    TAILCALL VM_RESUME;
+  } else
+    TAILCALL DISPATCH;
+}
+
+VM_FUNC(FUNCV) {
+  /* FUNCV: Vararg Lua function */
+  /* IFUNCV: Vararg Lua function, force interpreter */
+  /* JFUNCV: Vararg Lua function, JIT-compiled */
+  assert(OP == BC_FUNCV && "NYI BYTECODE: IFUNCV/JFUNCV");
+  GCproto *pt = (GCproto*)((intptr_t)(PC-1) - sizeof(GCproto));
+  TOP = BASE + A;
+  KBASE = mref(pt->k, void);
+  assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
+  /* Save base of frame containing all parameters. */
+  TValue *oldbase = BASE;
+  /* Base for new frame containing only fixed parameters. */
+  BASE += 2 + NARGS;
+  copyTV(L, BASE-2, oldbase-2);
+  BASE[-1].u64 = FRAME_VARG + ((BASE - oldbase) << 3);
+  copyTVs(L, BASE, oldbase, pt->numparams, NARGS);
+  /* Fill moved args with nil. */
+  copyTVs(L, oldbase, NULL, min(pt->numparams, NARGS), 0);
+  TAILCALL DISPATCH;
+}
+
+VM_FUNC(FUNCC) {
+  /* FUNCC: Pseudo-header for C functions */
+  assert(OP == BC_FUNCC && "NYI BYTECODE: FUNCCW");
+  /* 
+  ** Call C function.
+  */
+  int nresults, resultofs;
+  lua_CFunction *f = &funcV(BASE-2)->c.f; /* C function pointer */
+  TOP = BASE + NARGS;
+  assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
+  STATE = ~LJ_VMST_C;
+  nresults = (*f)(L);
+  STATE = ~LJ_VMST_INTERP;
+  resultofs = TOP - (BASE + nresults);
+  VM_PAUSE;
+  if (vm_return(L, BASE[-1].u64, resultofs, nresults)) return;
+  TAILCALL VM_RESUME;
+}
+
+/*
+  XXX - handle ASM fast functions.
+  FIXME: need symbols for pseudo opcodes.
+*/
+
+VM_FUNC(assert) { // 0x61
+  VM_PAUSE;
+  if (NARGS >= 1 && tvistruecond(BASE)) {
+    if (vm_return(L, BASE[-1].u64, 0, NARGS)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(type) { // 0x62
+  VM_PAUSE;
+  if (NARGS >= 1) {
+    uint32_t type = itype(BASE);
+    GCfuncC *f = &funcV(BASE-2)->c;
+    if (type < LJ_TISNUM)
+      type = LJ_TISNUM;
+    type = ~type;
+    BASE[-2] = f->upvalue[type];
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(next) { // 0x63
+  if (NARGS >= 1 && tvistab(BASE)) {
+    if (NARGS < 2) setnilV(BASE+1);
+    TOP = BASE;
+    vm_savepc(L, (BCIns*)BASE[-1].u64);
+    VM_PAUSE;
+    if (lj_tab_next(L, tabV(BASE), BASE+1)) {
+      /* Copy key and value to results. */
+      if (vm_return(L, BASE[-1].u64, 1, 2)) return;
+    } else {
+      /* End of traversal: return nil. */
+      setnilV(BASE-2);
+      if (vm_return(L, BASE[-1].u64, -2, 1)) return;
     }
-    if (OP == BC_JFUNCF)
-      vm_exec_trace(L, D);
-    break;
-  case BC_FUNCV:
-    TRACE("FUNCV");
-    {
-      GCproto *pt = (GCproto*)((intptr_t)(PC-1) - sizeof(GCproto));
-      TOP = BASE + A;
-      KBASE = mref(pt->k, void);
-      assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
-      /* Save base of frame containing all parameters. */
-      TValue *oldbase = BASE;
-      /* Base for new frame containing only fixed parameters. */
-      BASE += 2 + NARGS;
-      copyTV(L, BASE-2, oldbase-2);
-      BASE[-1].u64 = FRAME_VARG + ((BASE - oldbase) << 3);
-      copyTVs(L, BASE, oldbase, pt->numparams, NARGS);
-      /* Fill moved args with nil. */
-      copyTVs(L, oldbase, NULL, min(pt->numparams, NARGS), 0);
-    }      
-    break;
-  case BC_IFUNCV: assert(0 && "NYI BYTECODE: IFUNCV");
-  case BC_JFUNCV: assert(0 && "NYI BYTECODE: JFUNCV");
-  case BC_FUNCCW: assert(0 && "NYI BYTECODE: FUNCCW");
-  case BC_FUNCC:
-    TRACE("FUNCC");
-    /* 
-    ** Call C function.
-    */
-    {
-      int nresults, resultofs;
-      lua_CFunction *f = &funcV(BASE-2)->c.f; /* C function pointer */
-      TOP = BASE + NARGS;
-      assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
-      STATE = ~LJ_VMST_C;
-      nresults = (*f)(L);
-      STATE = ~LJ_VMST_INTERP;
-      resultofs = TOP - (BASE + nresults);
-      if (vm_return(L, BASE[-1].u64, resultofs, nresults)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(pairs) { // 0x64
+  VM_PAUSE;
+  /* XXX - punt to fallback. */
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(ipairs_aux) { // 0x65
+  VM_PAUSE;
+  if (NARGS >= 2 && tvistab(BASE) && tvisnum(BASE+1)) {
+    TValue *tab = BASE;
+    TValue *i = BASE+1;
+    const TValue *v;
+    uint64_t link = BASE[-1].u64;
+    /* Increment index. */
+    uint32_t n = numV(i) + 1;
+    setnumV(BASE-2, n);
+    /* Try to load value from table (if this fails the iterator ends.)  */
+    if (n < tabV(tab)->asize) {
+      /* Value is in array part of tab. */
+      v = arrayslot(tabV(tab), n);
+      if (tvisnil(v)) goto ipairs_end;
+    } else {
+      if (!tabV(tab)->hmask) goto ipairs_end;
+      v = lj_tab_getinth(tabV(tab), n);
+      if (!v) goto ipairs_end;
     }
-    break;
-  default:
-    /*
-      XXX - handle ASM fast functions.
-      FIXME: need symbols for pseudo opcodes.
-    */
-    switch ((uint32_t)OP) {
-    case 0x61:
-      TRACEFF("assert");
-      if (NARGS >= 1 && tvistruecond(BASE)) {
-        if (vm_return(L, BASE[-1].u64, 0, NARGS)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x62:
-      TRACEFF("type");
-      if (NARGS >= 1) {
-        uint32_t type = itype(BASE);
-        GCfuncC *f = &funcV(BASE-2)->c;
-        if (type < LJ_TISNUM)
-          type = LJ_TISNUM;
-        type = ~type;
-        BASE[-2] = f->upvalue[type];
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x63:
-      TRACEFF("next");
-      if (NARGS >= 1 && tvistab(BASE)) {
-        if (NARGS < 2) setnilV(BASE+1);
-        TOP = BASE;
-        vm_savepc(L, (BCIns*)BASE[-1].u64);
-        if (lj_tab_next(L, tabV(BASE), BASE+1)) {
-          /* Copy key and value to results. */
-          if (vm_return(L, BASE[-1].u64, 1, 2)) return;
-        } else {
-          /* End of traversal: return nil. */
-          setnilV(BASE-2);
-          if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-        }
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x64:
-      TRACEFF("pairs");
-      /* XXX - punt to fallback. */
-      if (fff_fallback(L)) return;
-      break;
-    case 0x65:
-      TRACEFF("ipairs_aux");
-      if (NARGS >= 2 && tvistab(BASE) && tvisnum(BASE+1)) {
-        TValue *tab = BASE;
-        TValue *i = BASE+1;
-        const TValue *v;
-        uint64_t link = BASE[-1].u64;
-        /* Increment index. */
-        uint32_t n = numV(i) + 1;
-        setnumV(BASE-2, n);
-        /* Try to load value from table (if this fails the iterator ends.)  */
-        if (n < tabV(tab)->asize) {
-          /* Value is in array part of tab. */
-          v = arrayslot(tabV(tab), n);
-          if (tvisnil(v)) goto ipairs_end;
-        } else {
-          if (!tabV(tab)->hmask) goto ipairs_end;
-          v = lj_tab_getinth(tabV(tab), n);
-          if (!v) goto ipairs_end;
-        }
-        BASE[-1] = *v; /* Copy array slot. */
-        vm_return(L, link, -2, 2); /* Iterate: return (i, value). */
-        break;
-        /* End of interator: return no values. */
-      ipairs_end:
-        if (vm_return(L, link, -2, 0)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x66:
-      TRACEFF("ipairs");
-      /* XXX - punt to fallback. */
-      if (fff_fallback(L)) return;
-      break;
-    case 0x67:
-      TRACEFF("getmetatable");
-      if (NARGS > 0) {
-        GCtab *mt;
-        if (tvistab(BASE))
-          mt = tabref(tabV(BASE)->metatable);
-        else if (tvisudata(BASE))
-          mt = tabref(udataV(BASE)->metatable);
-        else
-          mt = tabref(basemt_obj(G(L), BASE));
-        if (mt) {
-          cTValue *mo = lj_tab_getstr(mt, mmname_str(G(L), MM_metatable));
-          if (mo)
-            copyTV(L, BASE-2, mo);
-          else
-            setgcVraw(BASE-2, (GCobj*)mt, LJ_TTAB);
-        } else {
-          setnilV(BASE-2);
-        }
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x68:
-      TRACEFF("setmetatable");
-      /* XXX - punt to fallback. */
-      if (fff_fallback(L)) return;
-      break;
-    case 0x6a:
-      TRACEFF("tonumber");
-      if (NARGS == 1 && tvisnumber(BASE)) {
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x69:
-      TRACEFF("rawget");
-      if (NARGS >= 2 && tvistab(BASE)) {
-        copyTV(L, BASE, lj_tab_get(L, tabV(BASE), BASE+1));
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x6b:
-      TRACEFF("tostring");
-      /* XXX - punt to fallback. */
-      if (fff_fallback(L)) return;
-      break;
-    case 0x6c:
-      TRACEFF("pcall");
-      if (NARGS >= 1) {
-        /* First argument (BASE) is the function to call. */
-        TValue *callbase = BASE+2;
-        int hookflag = hook_active(G(L)) ? 1 : 0;
-        int copyargs = NARGS--;
-        /* Copy remaining function arguments (from top to avoid clobberin'). */
-        while (copyargs--)
-          copyTV(L, callbase+copyargs, BASE+1+copyargs);
-        vm_call(L, callbase, NARGS, FRAME_PCALL + hookflag);
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x6d:
-      TRACEFF("xpcall");
-      if (NARGS >= 2 && tvisfunc(BASE+1)) {
-        /* First argument (BASE) is the function to call, second argument
-           (BASE+1) is the handler. */
-        TValue f;
-        TValue *callbase = BASE+3;
-        int hookflag = hook_active(G(L)) ? 1 : 0;
-        int copyargs = (NARGS -= 2);
-        /* Swap function and handler. */
-        f = BASE[0]; BASE[0] = BASE[1]; BASE[1] = f;
-        /* Copy remaining function arguments (from top to avoid clobberin'). */
-        while (copyargs--)
-          copyTV(L, callbase+copyargs, BASE+2+copyargs);
-        vm_call(L, callbase, NARGS, FRAME_PCALL + hookflag);
-      } else if (fff_fallback(L)) return;
-      break;
-    /*
-     * -- Resuming and yielding from coroutines ---------------------------
-     *
-     * Coroutines (from an implementation standpoint) are implemented as
-     * separate execution contexts (lua_State), notably with dedicated
-     * stacks, that execute a given function interleaved with the execution
-     * of the parent lua_State.
-     *
-     * An instance of an execution state (represented as a lua_State) is
-     * also called a "thread". A thread combined with an "initial function"
-     * forms what we call a coroutine.
-     *
-     * Resuming a coroutine for the first time is like calling the initial
-     * function inside the coroutine's thread with the arguments provided
-     * (which have to be copied to the coroutine’s stack.)
-     *
-     * A resumed coroutine can yield result values, or throw an error. A
-     * coroutine that has yielded can be resumed again to continue
-     * execution from the point where it yielded.
-     *
-     * Resuming a coroutine again after a yield is like returning to the
-     * caller of yield in the coroutine’s thread with the arguments to
-     * resume being the result values.
-     */
-    case 0x6e:
-      TRACEFF("coroutine.yield");
-      {
-        /* Yielding from a coroutine means unlinking its CFrame and setting its
-         * thread status to LUA_YIELD before returning to lj_vm_resume.
-         */
-        if ((intptr_t)L->cframe & CFRAME_RESUME) {
-          TOP = BASE+NARGS;
-          L->cframe = 0;
-          L->status = LUA_YIELD;
-          return;
-        } else
-          if (fff_fallback(L)) return;
-      }
-      break;
-    case 0x6f:
-      TRACEFF("coroutine.resume");
-    case 0x70:
-      if (OP == 0x70)
-        TRACEFF("coroutine.wrap_aux");
-      {
-        /* The code for the resume and the wrap_aux fast functions are similar
-         * enough to share most of their code. They differ as follows:
-         *
-         *   - resume behaves like pcall, catching errors during coroutine
-         *     execution and prepending a boolean status value to the results
-         *
-         *   - wrap_aux behaves like a regular function call, it returns the
-         *     results as is, but throws an error if the coroutine fails
-         *
-         * The code below prepares the stack frame of coroutine `co'. The frame
-         * starts at `rbase' and ends at `rtop'. See lj_vm_resume for how the
-         * call/return behavior of resume is implemented.
-         *
-         * On yield resume will return `true' followed by the coroutine’s
-         * results. On error resume returns `false' and the error message
-         * produced by the coroutine.
-         */
-        lua_State *co;
-        TValue *rbase, *rtop;
-        if (OP == 0x6f) {
-          /* resume: first argument must be a thread (the coroutine object). */
-          if (NARGS >= 1 && tvisthread(BASE))
-            co = threadV(BASE);
-          else
-            goto resume_fallback;
-        } else {
-          /* wrap_aux: get thread from caller upvalue. */
-          co = threadV(&funcV(BASE-2)->c.upvalue[0]);
-        }
-        /* The thread must not have a CFrame attached. */
-        if (co->cframe)
-          goto resume_fallback;
-        /* The thread's status must be either LUA_OK or LUA_YIELD. */
-        if (co->status > LUA_YIELD)
-          goto resume_fallback;
-        /* If the coroutine is resumed for the first time then we expect the
-           initial function at the top of its stack. */
-        if (co->status == LUA_OK && co->base == co->top)
-          goto resume_fallback;
-        /* Prepare frame at coroutine’s TOP. (When resumed for the first time,
-           make room for frame link.) */
-        rbase = co->top + (co->status == LUA_OK);
-        /* Extend coroutine frame to hold remaining arguments. */
-        rtop = rbase + NARGS - (OP == 0x6f); /* resume: -1 for `co' */
-        /* Make sure we don't exceed the coroutine’s stack space. */
-        if (rtop > mref(co->maxstack, TValue))
-          goto resume_fallback;
-        else
-          co->top = rtop;
-        /* Save caller PC. */
-        vm_savepc(L, (BCIns*)BASE[-1].u64);
-        /* Clear arguments from stack. */
-        TOP = BASE;
-        if (OP == 0x6f)
-          /* resume: keep resumed thread in parent stack for GC. */
-          TOP += 1;
-        /* Copy arguments. resume: -1 for `co' */
-        copyTVs(L, rbase, TOP, rtop-rbase, NARGS - (OP == 0x6f));
-        /* Resume coroutine at rbase. */
-        lj_vm_resume(co, rbase, 0, 0);
-        /* Reference the now-current lua_State. */
-        setgcref(G(L)->cur_L, obj2gco(L));
-        /* Handle result depending on co->status. */
-        if (co->status <= LUA_YIELD) {
-          /* Coroutine yielded with results. */
-          int nresults = co->top - co->base;
-          /* Clear coroutine stack. */
-          co->top = co->base;
-          /* Ensure we have stack space for coroutine results. */
-          assert(TOP+nresults <= mref(L->maxstack, TValue));
-          /* Copy coroutine results */
-          copyTVs(L, TOP, co->base, nresults, nresults);
-          if (OP==0x6f) {
-            /* resume: prepend true to results. */
-            setboolV(BASE, 1);
-            nresults += 1;
-          }
-          vm_return(L, BASE[-1].u64, 0, nresults);
-        } else {
-          /* Coroutine returned with error (at co->top-1). */
-          if (OP == 0x70) {
-            /* wrap_aux: throw error. */
-            lj_ffh_coroutine_wrap_err(L, co);
-          } else {
-            /* resume: catch the error. */
-            co->top -= 1; /* Clear error from coroutine stack. */
-            /* Return (false, <error>) */
-            setboolV(BASE, 0);
-            copyTV(L, BASE+1, co->top);
-            if (vm_return(L, BASE[-1].u64, 0, 2)) return;
-          }
-        }
-        break;
-      resume_fallback:
-        if (fff_fallback(L)) return;
-        break;
-      }
-    case 0x71:
-      TRACEFF("math.abs");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE-2, BASE->n < 0 ? -1*BASE->n : BASE->n);
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x72:
-      TRACEFF("math.floor");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE-2, lj_vm_floor(numV(BASE)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x73:
-      TRACEFF("math.ceil");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE-2, lj_vm_ceil(numV(BASE)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x74:
-      TRACEFF("math.sqrt");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE-2, sqrt(numV(BASE)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x75:
-      TRACEFF("math.log10");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE-2, log10(numV(BASE)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x76:
-      TRACEFF("math.exp");
-      if (NARGS >= 1 && tvisnum(BASE)) {
+    BASE[-1] = *v; /* Copy array slot. */
+    vm_return(L, link, -2, 2); /* Iterate: return (i, value). */
+    TAILCALL VM_RESUME;
+    /* End of interator: return no values. */
+  ipairs_end:
+    if (vm_return(L, link, -2, 0)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(ipairs) { // 0x66
+  VM_PAUSE;
+  /* XXX - punt to fallback. */
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(getmetatable) { // 0x67
+  VM_PAUSE;
+  if (NARGS > 0) {
+    GCtab *mt;
+    if (tvistab(BASE))
+      mt = tabref(tabV(BASE)->metatable);
+    else if (tvisudata(BASE))
+      mt = tabref(udataV(BASE)->metatable);
+    else
+      mt = tabref(basemt_obj(G(L), BASE));
+    if (mt) {
+      cTValue *mo = lj_tab_getstr(mt, mmname_str(G(L), MM_metatable));
+      if (mo)
+        copyTV(L, BASE-2, mo);
+      else
+        setgcVraw(BASE-2, (GCobj*)mt, LJ_TTAB);
+    } else {
+      setnilV(BASE-2);
+    }
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(setmetatable) { // 0x68
+  VM_PAUSE;
+  /* XXX - punt to fallback. */
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(rawget) { // 0x69
+  VM_PAUSE;
+  if (NARGS >= 2 && tvistab(BASE)) {
+    copyTV(L, BASE, lj_tab_get(L, tabV(BASE), BASE+1));
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(tonumber) { // 0x6a
+  VM_PAUSE;
+  if (NARGS == 1 && tvisnumber(BASE)) {
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(tostring) { // 0x6b
+  VM_PAUSE;
+  /* XXX - punt to fallback. */
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(pcall) { // 0x6c
+  VM_PAUSE;
+  if (NARGS >= 1) {
+    /* First argument (BASE) is the function to call. */
+    TValue *callbase = BASE+2;
+    int hookflag = hook_active(G(L)) ? 1 : 0;
+    int copyargs = NARGS--;
+    /* Copy remaining function arguments (from top to avoid clobberin'). */
+    while (copyargs--)
+      copyTV(L, callbase+copyargs, BASE+1+copyargs);
+    vm_call(L, callbase, NARGS, FRAME_PCALL + hookflag);
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(xpcall) { // 0x6d
+  VM_PAUSE;
+  if (NARGS >= 2 && tvisfunc(BASE+1)) {
+    /* First argument (BASE) is the function to call, second argument
+        (BASE+1) is the handler. */
+    TValue f;
+    TValue *callbase = BASE+3;
+    int hookflag = hook_active(G(L)) ? 1 : 0;
+    int copyargs = (NARGS -= 2);
+    /* Swap function and handler. */
+    f = BASE[0]; BASE[0] = BASE[1]; BASE[1] = f;
+    /* Copy remaining function arguments (from top to avoid clobberin'). */
+    while (copyargs--)
+      copyTV(L, callbase+copyargs, BASE+2+copyargs);
+    vm_call(L, callbase, NARGS, FRAME_PCALL + hookflag);
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+/*
+ * -- Resuming and yielding from coroutines ---------------------------
+ *
+ * Coroutines (from an implementation standpoint) are implemented as
+ * separate execution contexts (lua_State), notably with dedicated
+ * stacks, that execute a given function interleaved with the execution
+ * of the parent lua_State.
+ *
+ * An instance of an execution state (represented as a lua_State) is
+ * also called a "thread". A thread combined with an "initial function"
+ * forms what we call a coroutine.
+ *
+ * Resuming a coroutine for the first time is like calling the initial
+ * function inside the coroutine's thread with the arguments provided
+ * (which have to be copied to the coroutine’s stack.)
+ *
+ * A resumed coroutine can yield result values, or throw an error. A
+ * coroutine that has yielded can be resumed again to continue
+ * execution from the point where it yielded.
+ *
+ * Resuming a coroutine again after a yield is like returning to the
+ * caller of yield in the coroutine’s thread with the arguments to
+ * resume being the result values.
+ */
+
+VM_FUNC(coroutine_yield) { // 0x6e
+  /* Yielding from a coroutine means unlinking its CFrame and setting its
+   * thread status to LUA_YIELD before returning to lj_vm_resume.
+   */
+  if ((intptr_t)L->cframe & CFRAME_RESUME) {
+    TOP = BASE+NARGS;
+    L->cframe = 0;
+    L->status = LUA_YIELD;
+    return;
+  } else {
+    VM_PAUSE;
+    if (fff_fallback(L)) return;
+    TAILCALL VM_RESUME;
+  }
+}
+
+VM_FUNC(coroutine_resume) { // 0x6f, and wrap_aux 0x70
+  /* The code for the resume and the wrap_aux fast functions are similar
+   * enough to share most of their code. They differ as follows:
+   *
+   *   - resume behaves like pcall, catching errors during coroutine
+   *     execution and prepending a boolean status value to the results
+   *
+   *   - wrap_aux behaves like a regular function call, it returns the
+   *     results as is, but throws an error if the coroutine fails
+   *
+   * The code below prepares the stack frame of coroutine `co'. The frame
+   * starts at `rbase' and ends at `rtop'. See lj_vm_resume for how the
+   * call/return behavior of resume is implemented.
+   *
+   * On yield resume will return `true' followed by the coroutine’s
+   * results. On error resume returns `false' and the error message
+   * produced by the coroutine.
+   */
+  VM_PAUSE;
+  lua_State *co;
+  TValue *rbase, *rtop;
+  if (OP == 0x6f) {
+    /* resume: first argument must be a thread (the coroutine object). */
+    if (NARGS >= 1 && tvisthread(BASE))
+      co = threadV(BASE);
+    else
+      goto resume_fallback;
+  } else {
+    /* wrap_aux: get thread from caller upvalue. */
+    co = threadV(&funcV(BASE-2)->c.upvalue[0]);
+  }
+  /* The thread must not have a CFrame attached. */
+  if (co->cframe)
+    goto resume_fallback;
+  /* The thread's status must be either LUA_OK or LUA_YIELD. */
+  if (co->status > LUA_YIELD)
+    goto resume_fallback;
+  /* If the coroutine is resumed for the first time then we expect the
+      initial function at the top of its stack. */
+  if (co->status == LUA_OK && co->base == co->top)
+    goto resume_fallback;
+  /* Prepare frame at coroutine’s TOP. (When resumed for the first time,
+      make room for frame link.) */
+  rbase = co->top + (co->status == LUA_OK);
+  /* Extend coroutine frame to hold remaining arguments. */
+  rtop = rbase + NARGS - (OP == 0x6f); /* resume: -1 for `co' */
+  /* Make sure we don't exceed the coroutine’s stack space. */
+  if (rtop > mref(co->maxstack, TValue))
+    goto resume_fallback;
+  else
+    co->top = rtop;
+  /* Save caller PC. */
+  vm_savepc(L, (BCIns*)BASE[-1].u64);
+  /* Clear arguments from stack. */
+  TOP = BASE;
+  if (OP == 0x6f)
+    /* resume: keep resumed thread in parent stack for GC. */
+    TOP += 1;
+  /* Copy arguments. resume: -1 for `co' */
+  copyTVs(L, rbase, TOP, rtop-rbase, NARGS - (OP == 0x6f));
+  /* Resume coroutine at rbase. */
+  lj_vm_resume(co, rbase, 0, 0);
+  /* Reference the now-current lua_State. */
+  setgcref(G(L)->cur_L, obj2gco(L));
+  /* Handle result depending on co->status. */
+  if (co->status <= LUA_YIELD) {
+    /* Coroutine yielded with results. */
+    int nresults = co->top - co->base;
+    /* Clear coroutine stack. */
+    co->top = co->base;
+    /* Ensure we have stack space for coroutine results. */
+    assert(TOP+nresults <= mref(L->maxstack, TValue));
+    /* Copy coroutine results */
+    copyTVs(L, TOP, co->base, nresults, nresults);
+    if (OP==0x6f) {
+      /* resume: prepend true to results. */
+      setboolV(BASE, 1);
+      nresults += 1;
+    }
+    vm_return(L, BASE[-1].u64, 0, nresults);
+  } else {
+    /* Coroutine returned with error (at co->top-1). */
+    if (OP == 0x70) {
+      /* wrap_aux: throw error. */
+      lj_ffh_coroutine_wrap_err(L, co);
+    } else {
+      /* resume: catch the error. */
+      co->top -= 1; /* Clear error from coroutine stack. */
+      /* Return (false, <error>) */
+      setboolV(BASE, 0);
+      copyTV(L, BASE+1, co->top);
+      if (vm_return(L, BASE[-1].u64, 0, 2)) return;
+    }
+  }
+  TAILCALL VM_RESUME;
+resume_fallback:
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_abs) { // 0x71
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    setnumV(BASE-2, BASE->n < 0 ? -1*BASE->n : BASE->n);
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_floor) { // 0x72
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    setnumV(BASE-2, lj_vm_floor(numV(BASE)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_ceil) { // 0x73
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    setnumV(BASE-2, lj_vm_ceil(numV(BASE)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_sqrt) { // 0x74
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    setnumV(BASE-2, sqrt(numV(BASE)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_log10) { // 0x75
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    setnumV(BASE-2, log10(numV(BASE)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_exp) { // 0x76
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
         setnumV(BASE-2, exp(numV(BASE)));
         if (vm_return(L, BASE[-1].u64, -2, 1)) return;
       } else if (fff_fallback(L)) return;
-      break;
-    case 0x77:
-      TRACEFF("math.sin");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE-2, sin(numV(BASE)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x78:
-      TRACEFF("math.cos");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE-2, cos(numV(BASE)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x79:
-      TRACEFF("math.tan");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE-2, tan(numV(BASE)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x80:
-      TRACEFF("math.frexp");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        int n;
-        setnumV(BASE, frexp(numV(BASE), &n));
-        setnumV(BASE+1, n);
-        if (vm_return(L, BASE[-1].u64, 0, 2)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x81:
-      TRACEFF("math.modf");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE+1, modf(numV(BASE), &BASE->n));
-        if (vm_return(L, BASE[-1].u64, 0, 2)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x82:
-      TRACEFF("math.log");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        setnumV(BASE-2, log(numV(BASE)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x83:
-      TRACEFF("math.atan2");
-      if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
-        setnumV(BASE-2, atan2(numV(BASE), numV(BASE+1)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x86:
-      TRACEFF("math.ldexp");
-      if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
-        setnumV(BASE-2, ldexp(numV(BASE), numV(BASE+1)));
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x87:
-      TRACEFF("math.min");
-      if (NARGS < 1 || !tvisnum(BASE))
-        goto min_fallback;
-      while (NARGS-- > 1) {
-        if (!tvisnum(BASE+NARGS)) goto min_fallback;
-        setnumV(BASE, min(numV(BASE), numV(BASE+NARGS)));
-      }
-      if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      break;
-    min_fallback:
-      if (fff_fallback(L)) return;
-      break;
-    case 0x88:
-      TRACEFF("math.max");
-      if (NARGS < 1 || !tvisnum(BASE))
-        goto max_fallback;
-      while (NARGS-- > 1) {
-        if (!tvisnum(BASE+NARGS)) goto max_fallback;
-        setnumV(BASE, max(numV(BASE), numV(BASE+NARGS)));
-      }
-      if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      break;
-    max_fallback:
-      if (fff_fallback(L)) return;
-      break;
-    case 0x89:
-      TRACEFF("bit.tobit");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        BASE->n = tobit(BASE);
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x8a:
-      TRACEFF("bit.bnot");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        BASE->n = ~tobit(BASE);
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x8b:
-      TRACEFF("bit.bswap");
-      if (NARGS >= 1 && tvisnum(BASE)) {
-        BASE->n = (int32_t)bswap_32((uint32_t)tobit(BASE));
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x8c:
-      TRACEFF("bit.lshift");
-      if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
-        BASE->n = tobit(BASE) << tobit(BASE+1);
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x8d:
-      TRACEFF("bit.rshift");
-      if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
-        BASE->n = (int32_t)((uint32_t)tobit(BASE) >> tobit(BASE+1));
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x8e:
-      TRACEFF("bit.arshift");
-      if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
-        BASE->n = tobit(BASE) >> tobit(BASE+1);
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x8f:
-      TRACEFF("bit.rol");
-      if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
-        uint32_t b = tobit(BASE), n = (uint32_t)tobit(BASE+1) & 31;
-        BASE->n = (int32_t)((b << n) | (b >> (32-n)));
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x90:
-      TRACEFF("bit.ror");
-      if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
-        uint32_t b = tobit(BASE), n = (uint32_t)tobit(BASE+1) & 31;
-        BASE->n = (int32_t)((b << (32-n)) | (b >> n));
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x91:
-      TRACEFF("bit.band");
-      {
-        if (NARGS < 1 || !tvisnum(BASE))
-          goto band_fallback;
-        int32_t res = tobit(BASE);
-        while (NARGS-- > 1) {
-          if (!tvisnum(BASE+NARGS)) goto band_fallback;
-          res &= tobit(BASE+NARGS);
-        }
-        BASE->n = res;
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-        break;
-      band_fallback:
-        if (fff_fallback(L)) return;
-        break;
-      }
-    case 0x92:
-      TRACEFF("bit.bor");
-      {
-        if (NARGS < 1 || !tvisnum(BASE))
-          goto bor_fallback;
-        int32_t res = tobit(BASE);
-        while (NARGS-- > 1) {
-          if (!tvisnum(BASE+NARGS)) goto band_fallback;
-          res |= tobit(BASE+NARGS);
-        }
-        BASE->n = res;
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-        break;
-      bor_fallback:
-        if (fff_fallback(L)) return;
-        break;
-      }
-    case 0x93:
-      TRACEFF("bit.bxor");
-      {
-        if (NARGS < 1 || !tvisnum(BASE))
-          goto bxor_fallback;
-        int32_t res = tobit(BASE);
-        while (NARGS-- > 1) {
-          if (!tvisnum(BASE+NARGS)) goto band_fallback;
-          res ^= tobit(BASE+NARGS);
-        }
-        BASE->n = res;
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-        break;
-      bxor_fallback:
-        if (fff_fallback(L)) return;
-        break;
-      }
-    case 0x94:
-      TRACEFF("string.byte");
-      if (NARGS >= 1 && tvisstr(BASE)
-          && (NARGS == 1 || tvisnum(BASE+1))
-          && (NARGS == 2 || tvisnum(BASE+2))) {
-        GCstr *str = strV(BASE);
-        int start = NARGS >= 2 ? numV(BASE+1) : 1;
-        int end = NARGS >= 3 ? numV(BASE+2) : start;
-        int i, nresults;
-        if (start < 0)
-          start = max(start + (int)str->len+1, 1);
-        else
-          start = max(min(start, (int)str->len+1), 1);
-        if (end < 0)
-          end = max(end + (int)str->len+1, 0);
-        else
-          end = min(end, (int)str->len);
-        nresults = max(1+end-start, 0);
-        assert(BASE+nresults <= mref(L->maxstack, TValue));
-        for (i=0; i+start <= end; i++)
-          setnumV(BASE+i, (uint8_t)(strdata(str)[i+start-1]));
-        if (vm_return(L, BASE[-1].u64, 0, nresults)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x95:
-      TRACEFF("string.char");
-      /* XXX - punt to fallback. */
-      fff_fallback(L);
-      break;
-    case 0x96:
-      TRACEFF("string.sub");
-      vm_savepc(L, PC);
-      lj_gc_check(L);
-      if (NARGS >= 2 && tvisstr(BASE) && tvisnum(BASE+1)
-          && (NARGS == 2 || tvisnum(BASE+2))) {
-        GCstr *str = strV(BASE);
-        int start = numV(BASE+1);
-        int end = NARGS > 2 ? numV(BASE+2) : -1;
-        if (start < 0)
-          start = max(start + (int)str->len+1, 1);
-        else
-          start = max(min(start, (int)str->len+1), 1);
-        if (end < 0)
-          end = max(end + (int)str->len+1, 0);
-        else
-          end = min(end, (int)str->len);
-        str = lj_str_new(L, strdata(str)+start-1, max(1+end-start, 0));
-        setgcVraw(BASE-2, (GCobj *)str, LJ_TSTR);
-        if (vm_return(L, BASE[-1].u64, -2, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    case 0x97:
-    case 0x98:
-    case 0x99:
-      /* Fast function string operations. */
-      vm_savepc(L, PC);
-      lj_gc_check(L);
-      if (NARGS >= 1 && tvisstr(BASE)) {
-        GCstr *str = strV(BASE);
-        SBuf *buf = &G(L)->tmpbuf;
-        buf->L = L;
-        buf->p = buf->b;
-        switch ((uint32_t)OP) {
-        case 0x97:
-          TRACEFF("string.reverse");
-          lj_buf_putstr_reverse(buf, str);
-          break;
-        case 0x98:
-          TRACEFF("string.lower");
-          lj_buf_putstr_lower(buf, str);
-          break;
-        case 0x99:
-          TRACEFF("string.upper");
-          lj_buf_putstr_upper(buf, str);
-          break;
-        default: assert(0 && "NYI: fast string operation");
-        }
-        setgcVraw(BASE, (GCobj *)lj_buf_tostr(buf), LJ_TSTR);
-        if (vm_return(L, BASE[-1].u64, 0, 1)) return;
-      } else if (fff_fallback(L)) return;
-      break;
-    default: assert(0 && "INVALID BYTECODE");
-    }
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_sin) { // 0x77
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    setnumV(BASE-2, sin(numV(BASE)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_cos) { // 0x78
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    setnumV(BASE-2, cos(numV(BASE)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_tan) { // 0x79
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    setnumV(BASE-2, tan(numV(BASE)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_frexp) { // 0x80
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    int n;
+    setnumV(BASE, frexp(numV(BASE), &n));
+    setnumV(BASE+1, n);
+    if (vm_return(L, BASE[-1].u64, 0, 2)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_modf) { // 0x81
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    int n;
+    setnumV(BASE, frexp(numV(BASE), &n));
+    setnumV(BASE+1, n);
+    if (vm_return(L, BASE[-1].u64, 0, 2)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_log) { // 0x82
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    setnumV(BASE-2, log(numV(BASE)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_atan) { // 0x83
+  VM_PAUSE;
+  if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
+    setnumV(BASE-2, atan2(numV(BASE), numV(BASE+1)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_ldexp) { // 0x86
+  VM_PAUSE;
+  if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
+    setnumV(BASE-2, ldexp(numV(BASE), numV(BASE+1)));
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_min) { // 0x87
+  VM_PAUSE;
+  if (NARGS < 1 || !tvisnum(BASE))
+    goto min_fallback;
+  while (NARGS-- > 1) {
+    if (!tvisnum(BASE+NARGS)) goto min_fallback;
+    setnumV(BASE, min(numV(BASE), numV(BASE+NARGS)));
   }
-  /* Tail recursion. */
-  goto execute;
+  if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  TAILCALL VM_RESUME;
+min_fallback:
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(math_max) { // 0x88
+  VM_PAUSE;
+  if (NARGS < 1 || !tvisnum(BASE))
+    goto max_fallback;
+  while (NARGS-- > 1) {
+    if (!tvisnum(BASE+NARGS)) goto max_fallback;
+    setnumV(BASE, max(numV(BASE), numV(BASE+NARGS)));
+  }
+  if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  TAILCALL VM_RESUME;
+max_fallback:
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_tobit) { // 0x89
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    BASE->n = tobit(BASE);
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_bnot) { // 0x8a
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    BASE->n = ~tobit(BASE);
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_bswap) { // 0x8b
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisnum(BASE)) {
+    BASE->n = (int32_t)bswap_32((uint32_t)tobit(BASE));
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_lshift) { // 0x8c
+  VM_PAUSE;
+  if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
+    BASE->n = tobit(BASE) << tobit(BASE+1);
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_rshift) { // 0x8d
+  VM_PAUSE;
+  if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
+    BASE->n = (int32_t)((uint32_t)tobit(BASE) >> tobit(BASE+1));
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_arshift) { // 0x8e
+  VM_PAUSE;
+  if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
+    BASE->n = tobit(BASE) >> tobit(BASE+1);
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_rol) { // 0x8f
+  VM_PAUSE;
+  if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
+    uint32_t b = tobit(BASE), n = (uint32_t)tobit(BASE+1) & 31;
+    BASE->n = (int32_t)((b << n) | (b >> (32-n)));
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_ror) { // 0x90
+  VM_PAUSE;
+  if (NARGS >= 2 && tvisnum(BASE) && tvisnum(BASE+1)) {
+    uint32_t b = tobit(BASE), n = (uint32_t)tobit(BASE+1) & 31;
+    BASE->n = (int32_t)((b << (32-n)) | (b >> n));
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_band) { // 0x91
+  VM_PAUSE;
+  if (NARGS < 1 || !tvisnum(BASE))
+    goto band_fallback;
+  int32_t res = tobit(BASE);
+  while (NARGS-- > 1) {
+    if (!tvisnum(BASE+NARGS)) goto band_fallback;
+    res &= tobit(BASE+NARGS);
+  }
+  BASE->n = res;
+  if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  TAILCALL VM_RESUME;
+band_fallback:
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_bor) { // 0x92
+  VM_PAUSE;
+  if (NARGS < 1 || !tvisnum(BASE))
+    goto bor_fallback;
+  int32_t res = tobit(BASE);
+  while (NARGS-- > 1) {
+    if (!tvisnum(BASE+NARGS)) goto bor_fallback;
+    res |= tobit(BASE+NARGS);
+  }
+  BASE->n = res;
+  if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  TAILCALL VM_RESUME;
+bor_fallback:
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(bit_bxor) { // 0x93
+  VM_PAUSE;
+  if (NARGS < 1 || !tvisnum(BASE))
+    goto bxor_fallback;
+  int32_t res = tobit(BASE);
+  while (NARGS-- > 1) {
+    if (!tvisnum(BASE+NARGS)) goto bxor_fallback;
+    res ^= tobit(BASE+NARGS);
+  }
+  BASE->n = res;
+  if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  TAILCALL VM_RESUME;
+bxor_fallback:
+  if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(string_byte) { // 0x94
+  VM_PAUSE;
+  if (NARGS >= 1 && tvisstr(BASE)
+      && (NARGS == 1 || tvisnum(BASE+1))
+      && (NARGS == 2 || tvisnum(BASE+2))) {
+    GCstr *str = strV(BASE);
+    int start = NARGS >= 2 ? numV(BASE+1) : 1;
+    int end = NARGS >= 3 ? numV(BASE+2) : start;
+    int i, nresults;
+    if (start < 0)
+      start = max(start + (int)str->len+1, 1);
+    else
+      start = max(min(start, (int)str->len+1), 1);
+    if (end < 0)
+      end = max(end + (int)str->len+1, 0);
+    else
+      end = min(end, (int)str->len);
+    nresults = max(1+end-start, 0);
+    assert(BASE+nresults <= mref(L->maxstack, TValue));
+    for (i=0; i+start <= end; i++)
+      setnumV(BASE+i, (uint8_t)(strdata(str)[i+start-1]));
+    if (vm_return(L, BASE[-1].u64, 0, nresults)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(string_char) { // 0x95
+  VM_PAUSE;
+  /* XXX - punt to fallback. */
+  fff_fallback(L);
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(string_sub) { // 0x96
+  VM_PAUSE;
+  vm_savepc(L, PC);
+  lj_gc_check(L);
+  if (NARGS >= 2 && tvisstr(BASE) && tvisnum(BASE+1)
+      && (NARGS == 2 || tvisnum(BASE+2))) {
+    GCstr *str = strV(BASE);
+    int start = numV(BASE+1);
+    int end = NARGS > 2 ? numV(BASE+2) : -1;
+    if (start < 0)
+      start = max(start + (int)str->len+1, 1);
+    else
+      start = max(min(start, (int)str->len+1), 1);
+    if (end < 0)
+      end = max(end + (int)str->len+1, 0);
+    else
+      end = min(end, (int)str->len);
+    str = lj_str_new(L, strdata(str)+start-1, max(1+end-start, 0));
+    setgcVraw(BASE-2, (GCobj *)str, LJ_TSTR);
+    if (vm_return(L, BASE[-1].u64, -2, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(string_op) { // 0x97, 0x98, 0x99
+  VM_PAUSE;
+  /* Fast function string operations. */
+  vm_savepc(L, PC);
+  lj_gc_check(L);
+  if (NARGS >= 1 && tvisstr(BASE)) {
+    GCstr *str = strV(BASE);
+    SBuf *buf = &G(L)->tmpbuf;
+    buf->L = L;
+    buf->p = buf->b;
+    switch ((uint32_t)OP) {
+    case 0x97:
+      lj_buf_putstr_reverse(buf, str);
+      TAILCALL VM_RESUME;
+    case 0x98:
+      lj_buf_putstr_lower(buf, str);
+      TAILCALL VM_RESUME;
+    case 0x99:
+      lj_buf_putstr_upper(buf, str);
+      TAILCALL VM_RESUME;
+    default: assert(0 && "NYI: fast string operation");
+    }
+    setgcVraw(BASE, (GCobj *)lj_buf_tostr(buf), LJ_TSTR);
+    if (vm_return(L, BASE[-1].u64, 0, 1)) return;
+  } else if (fff_fallback(L)) return;
+  TAILCALL VM_RESUME;
+}
+
+VM_FUNC(NYI) {
+  assert(0 && "INVALID or NYI BYTECODE");
 }
 
 
@@ -2263,7 +2271,8 @@ int luacall(lua_State *L, int p, TValue *newbase, int nres, ptrdiff_t ef)
   res = _setjmp(cf.jb);
   if (res <= 0) { /* -1 signals to continue from pcall, xpcall. */
     /* Try */
-    execute(L);
+    BCIns curins = 0;
+    DISPATCH;
   } else {
     /* Catch */
     return res;
@@ -2306,7 +2315,8 @@ int lj_vm_cpcall(lua_State *L, lua_CFunction f, void *ud, lua_CPFunction cp) {
   res = _setjmp(cf.jb);
   if (res < 0) {
     /* -1 signals to continue execution from pcall, xpcall. */
-    execute(L);
+    BCIns curins = 0;
+    DISPATCH;
   } else if (res == 0) {
     /* Try */
     newbase = cp(L, f, ud);
@@ -2314,7 +2324,8 @@ int lj_vm_cpcall(lua_State *L, lua_CFunction f, void *ud, lua_CPFunction cp) {
       /* Setup VM state for callee. */
       STATE = ~LJ_VMST_INTERP;
       vm_call(L, newbase, L->top - newbase, FRAME_CP);
-      execute(L);
+      BCIns curins = 0;
+      DISPATCH;
     }
   } else {
     /* Catch */
@@ -2352,9 +2363,10 @@ int lj_vm_resume(lua_State *L, TValue *newbase, int nres1, ptrdiff_t ef) {
   }
   /* Setup "catch" jump buffer for a protected call. */
   res = _setjmp(cf.jb);
+  BCIns curins = 0;
   if (res <= 0) /* -1 signals to continue from pcall, xpcall. */
     /* Try */
-    execute(L);
+    DISPATCH;
   else
     /* Catch */
     L->status = res;
