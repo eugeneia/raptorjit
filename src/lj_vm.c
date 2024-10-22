@@ -262,7 +262,7 @@ static TValue *copyTVs(lua_State *L, TValue *dst, TValue *src,
 #define kgcref(n, type) ((type *)kgc(n))
 
 /* Branch to JMP:J. */
-#define branchPC(offset) { PC += offset - BCBIAS_J; }
+#define branchPC(offset) { PC += (int)offset - BCBIAS_J; }
 
 
 /* Execute virtual machine instructions in a tail-recursive loop. */
@@ -1821,13 +1821,13 @@ VM_FUNC(string_op) { // 0x97, 0x98, 0x99
     switch ((uint32_t)OP) {
     case 0x97:
       lj_buf_putstr_reverse(buf, str);
-      TAILCALL VM_RESUME;
+      break;
     case 0x98:
       lj_buf_putstr_lower(buf, str);
-      TAILCALL VM_RESUME;
+      break;
     case 0x99:
       lj_buf_putstr_upper(buf, str);
-      TAILCALL VM_RESUME;
+      break;
     default: assert(0 && "NYI: fast string operation");
     }
     setgcVraw(BASE, (GCobj *)lj_buf_tostr(buf), LJ_TSTR);
