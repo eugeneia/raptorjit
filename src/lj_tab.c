@@ -187,7 +187,6 @@ GCtab * lj_tab_dup(lua_State *L, const GCtab *kt)
       Node *next = nextnode(kn);
       /* Don't use copyTV here, since it asserts on a copy of a dead key. */
       n->val = kn->val; n->key = kn->key;
-      if (tvistab(&n->val)) setnilV(&n->val); /* Replace nil value marker. */
       setmref(n->next, next == NULL? next : (Node *)((char *)next + d));
     }
   }

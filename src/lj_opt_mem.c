@@ -230,9 +230,7 @@ static TRef fwd_ahload(jit_State *J, IRRef xref)
 	  return TREF_PRI(itype2irt(tv));
 	else if (tvisnum(tv))
 	  return lj_ir_knum_u64(J, tv->u64);
-	else if (tvistab(tv)) /* Template table nil value marker. */
-	  return TREF_NIL;
-	else if (tvisstr(tv))
+	else if (tvisgcv(tv))
 	  return lj_ir_kstr(J, strV(tv));
       }
       /* Othwerwise: don't intern as a constant. */
