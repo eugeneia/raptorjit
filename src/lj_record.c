@@ -1022,7 +1022,8 @@ int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
       mix.tab = TREF_NIL;
       goto immutable_mt;
     }
-    ix->mt = mix.tab = lj_ir_ktab(J, mt);
+    ix->mt = mix.tab = lj_ir_ggfload(J, IRT_TAB,
+      GG_OFS(g.gcroot[GCROOT_BASEMT+itypemap(&ix->tabv)]));
     goto nocheck;
   }
   ix->mt = mt ? mix.tab : TREF_NIL;
