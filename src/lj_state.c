@@ -252,7 +252,11 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
   lua_State *L = &GG->L;
   global_State *g = &GG->g;
   jit_State *J = &GG->J;
-  if (GG == NULL || !checkptrGC(GG)) return NULL;
+  if (GG == NULL) return NULL;
+  if (!checkptrGC(GG)) {
+    allocf(allocd, GG, sizeof(GG_State), 0);
+    return NULL;
+  }
   memset(GG, 0, sizeof(GG_State));
   L = &GG->L;
   g = &GG->g;
