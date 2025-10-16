@@ -166,7 +166,7 @@ const char *lj_strfmt_wstrnum(lua_State *L, cTValue *o, MSize *lenp)
   } else if (tvisbuf(o)) {
     SBufExt *sbx = bufV(o);
     *lenp = sbufxlen(sbx);
-    return sbx->r;
+    return sbx->r ? sbx->r : "";
   } else if (tvisnum(o)) {
     sb = lj_strfmt_putfnum(lj_buf_tmp_(L), STRFMT_G14, o->n);
   } else {
