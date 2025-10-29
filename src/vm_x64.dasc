@@ -3460,6 +3460,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   case BC_ITERN:
     |  hotloop RBd
     |->vm_IITERN:
+    |.if JIT
+    |  endbr
+    |.endif
     |  ins_A	// RA = base, (RB = nresults+1, RC = nargs+1 (2+1))
     |  mov TAB:RB, [BASE+RA*8-16]
     |  cleartp TAB:RB
