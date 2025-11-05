@@ -624,10 +624,15 @@ static int trace_abort(jit_State *J)
     J->cur.traceno = 0;
   }
   L->top--;  /* Remove error object */
-  if (e == LJ_TRERR_DOWNREC)
+  if (e == LJ_TRERR_DOWNREC) {
     return trace_downrec(J);
-  else if (e == LJ_TRERR_MCODEAL)
+  } else if (e == LJ_TRERR_MCODEAL) {
+    if (!J->mcarea) {  /* Disable JIT compiler if first mcode alloc fails. */
+      J->flags &= ~JIT_F_ON;
+      lj_dispatch_update(J2G(J));
+    }
     lj_trace_flushall(L);
+  }
   return 0;
 }
 
