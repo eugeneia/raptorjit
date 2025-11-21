@@ -1,1 +1,6 @@
-import (fetchTarball https://github.com/NixOS/nixpkgs-channels/archive/6a0155d2b7cb10aef1c63b654a2b172d78fd89b4.tar.gz)
+import (builtins.fetchTarball {
+  name = "nixos-unstable-2025-11-21";
+  url = "https://github.com/NixOS/nixpkgs/archive/4813e2e83025f1eb6d002d175a33ad2f9aacb2eb.zip";
+  # Hash obtained using `nix-prefetch-url --unpack <url>`
+  sha256 = "067h156q7jlmzy4mrqqf3s97jlcpzv2yimvxd8f7ibq279p68hgw";
+})

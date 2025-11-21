@@ -111,9 +111,9 @@ static TValue *mmcall(lua_State *L, ASMFunction cont, cTValue *mo,
   ** in asm:   [func slots ...] [cont|PC] [mo|delta]  [a]   [b]
   **           ^-- func base                          ^-- mm base
   ** after mm: [func slots ...]           [result]
-  **                ^-- copy to base[PC_RA] --/     for lj_cont_ra
+  **                ^-- copy to base[PC_RA] --/     for lj_vm_fn__cont_ra
   **                          istruecond + branch   for lj_cont_cond*
-  **                                       ignore   for lj_cont_nop
+  **                                       ignore   for lj_vm_fn__cont_nop
   ** next PC:  [func slots ...]
   */
   TValue *top = L->top;
@@ -146,7 +146,7 @@ cTValue *lj_meta_tget(lua_State *L, cTValue *o, cTValue *k)
       return NULL;  /* unreachable */
     }
     if (tvisfunc(mo)) {
-      L->top = mmcall(L, lj_cont_ra, mo, o, k);
+      L->top = mmcall(L, (ASMFunction)lj_vm_fn__cont_ra, mo, o, k);
       return NULL;  /* Trigger metamethod call. */
     }
     o = mo;
@@ -183,7 +183,7 @@ TValue *lj_meta_tset(lua_State *L, cTValue *o, cTValue *k)
       return NULL;  /* unreachable */
     }
     if (tvisfunc(mo)) {
-      L->top = mmcall(L, lj_cont_nop, mo, o, k);
+      L->top = mmcall(L, (ASMFunction)lj_vm_fn__cont_nop, mo, o, k);
       /* L->top+2 = v filled in by caller. */
       return NULL;  /* Trigger metamethod call. */
     }
@@ -225,7 +225,7 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
 	return NULL;  /* unreachable */
       }
     }
-    return mmcall(L, lj_cont_ra, mo, rb, rc);
+    return mmcall(L, (ASMFunction)lj_vm_fn__cont_ra, mo, rb, rc);
   }
 }
 
@@ -260,7 +260,7 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
       copyTV(L, top+2*LJ_FR2+2, top);  /* Carefully ordered stack copies! */
       copyTV(L, top+2*LJ_FR2+1, top-1);
       copyTV(L, top+LJ_FR2, mo);
-      setcont(top-1, lj_cont_cat);
+      setcont(top-1, (ASMFunction)lj_vm_fn__cont_cat);
       if (LJ_FR2) { setnilV(top); setnilV(top+2); top += 2; }
       return top+1;  /* Trigger metamethod call. */
     } else {
@@ -310,7 +310,7 @@ TValue * lj_meta_len(lua_State *L, cTValue *o)
       lj_err_optype(L, o, LJ_ERR_OPLEN);
     return NULL;
   }
-  return mmcall(L, lj_cont_ra, mo, o, LJ_52 ? o : niltv(L));
+  return mmcall(L, (ASMFunction)lj_vm_fn__cont_ra, mo, o, LJ_52 ? o : niltv(L));
 }
 
 /* Helper for equality comparisons. __eq metamethod. */
@@ -327,7 +327,7 @@ TValue *lj_meta_equal(lua_State *L, GCobj *o1, GCobj *o2, int ne)
 	return (TValue *)(intptr_t)ne;
     }
     top = curr_top(L);
-    setcont(top++, ne ? lj_cont_condf : lj_cont_condt);
+    setcont(top++, ne ? (ASMFunction)lj_vm_fn__cont_condf : (ASMFunction)lj_vm_fn__cont_condt);
     if (LJ_FR2) setnilV(top++);
     copyTV(L, top++, mo);
     if (LJ_FR2) setnilV(top++);
@@ -341,7 +341,7 @@ TValue *lj_meta_equal(lua_State *L, GCobj *o1, GCobj *o2, int ne)
 
 TValue * lj_meta_equal_cd(lua_State *L, BCIns ins)
 {
-  ASMFunction cont = (bc_op(ins) & 1) ? lj_cont_condf : lj_cont_condt;
+  ASMFunction cont = (bc_op(ins) & 1) ? (ASMFunction)lj_vm_fn__cont_condf : (ASMFunction)lj_vm_fn__cont_condt;
   int op = (int)bc_op(ins) & ~1;
   TValue tv;
   cTValue *mo, *o2, *o1 = &L->base[bc_a(ins)];
@@ -370,7 +370,7 @@ TValue * lj_meta_equal_cd(lua_State *L, BCIns ins)
 TValue *lj_meta_comp(lua_State *L, cTValue *o1, cTValue *o2, int op)
 {
   if (tviscdata(o1) || tviscdata(o2)) {
-    ASMFunction cont = (op & 1) ? lj_cont_condf : lj_cont_condt;
+    ASMFunction cont = (op & 1) ? (ASMFunction)lj_vm_fn__cont_condf : (ASMFunction)lj_vm_fn__cont_condt;
     MMS mm = (op & 2) ? MM_le : MM_lt;
     cTValue *mo = lj_meta_lookup(L, tviscdata(o1) ? o1 : o2, mm);
     if (LJ_UNLIKELY(tvisnil(mo))) goto err;
@@ -383,7 +383,7 @@ TValue *lj_meta_comp(lua_State *L, cTValue *o1, cTValue *o2, int op)
     } else {
     trymt:
       while (1) {
-	ASMFunction cont = (op & 1) ? lj_cont_condf : lj_cont_condt;
+	ASMFunction cont = (op & 1) ? (ASMFunction)lj_vm_fn__cont_condf : (ASMFunction)lj_vm_fn__cont_condt;
 	MMS mm = (op & 2) ? MM_le : MM_lt;
 	cTValue *mo = lj_meta_lookup(L, o1, mm);
 #if LJ_52

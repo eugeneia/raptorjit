@@ -794,16 +794,16 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
     J->baseslot -= (BCReg)cbase;
     J->base -= cbase;
     J->maxslot = cbase-(2<<LJ_FR2);
-    if (cont == lj_cont_ra) {
+    if (cont == (ASMFunction)lj_vm_fn__cont_ra) {
       /* Copy result to destination slot. */
       BCReg dst = bc_a(*(frame_contpc(frame)-1));
       J->base[dst] = gotresults ? J->base[cbase+rbase] : TREF_NIL;
       if (dst >= J->maxslot) {
 	J->maxslot = dst+1;
       }
-    } else if (cont == lj_cont_nop) {
+    } else if (cont == (ASMFunction)lj_vm_fn__cont_nop) {
       /* Nothing to do here. */
-    } else if (cont == lj_cont_cat) {
+    } else if (cont == (ASMFunction)lj_vm_fn__cont_cat) {
       BCReg bslot = bc_b(*(frame_contpc(frame)-1));
       TRef tr = gotresults ? J->base[cbase+rbase] : TREF_NIL;
       if (bslot != J->maxslot) {  /* Concatenate the remainder. */
@@ -829,7 +829,7 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
       }  /* Otherwise continue with another __concat call. */
     } else {
       /* Result type already specialized. */
-      lua_assert(cont == lj_cont_condf || cont == lj_cont_condt);
+      lua_assert(cont == (ASMFunction)lj_vm_fn__cont_condf || cont == (ASMFunction)lj_vm_fn__cont_condt);
     }
   } else {
     lj_trace_err(J, LJ_TRERR_NYIRETL);  /* NYI: handle return to C frame. */
@@ -842,7 +842,7 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
 /* Prepare to record call to metamethod. */
 static BCReg rec_mm_prep(jit_State *J, ASMFunction cont)
 {
-  BCReg s, top = cont == lj_cont_cat ? J->maxslot : curr_proto(J->L)->framesize;
+  BCReg s, top = cont == (ASMFunction)lj_vm_fn__cont_cat ? J->maxslot : curr_proto(J->L)->framesize;
   J->base[top] = lj_ir_k64(J, IR_KNUM, u64ptr(contptr(cont)));
   J->base[top+1] = TREF_CONT;
   J->framedepth++;
@@ -925,7 +925,7 @@ nocheck:
 static TRef rec_mm_arith(jit_State *J, RecordIndex *ix, MMS mm)
 {
   /* Set up metamethod call first to save ix->tab and ix->tabv. */
-  BCReg func = rec_mm_prep(J, mm == MM_concat ? lj_cont_cat : lj_cont_ra);
+  BCReg func = rec_mm_prep(J, mm == MM_concat ? (ASMFunction)lj_vm_fn__cont_cat : (ASMFunction)lj_vm_fn__cont_ra);
   TRef *base = J->base + func;
   TValue *basev = J->L->base + func;
   base[1+LJ_FR2] = ix->tab; base[2+LJ_FR2] = ix->key;
@@ -955,7 +955,7 @@ static TRef rec_mm_len(jit_State *J, TRef tr, TValue *tv)
   ix.tab = tr;
   copyTV(J->L, &ix.tabv, tv);
   if (lj_record_mm_lookup(J, &ix, MM_len)) {
-    BCReg func = rec_mm_prep(J, lj_cont_ra);
+    BCReg func = rec_mm_prep(J, (ASMFunction)lj_vm_fn__cont_ra);
     TRef *base = J->base + func;
     TValue *basev = J->L->base + func;
     base[0] = ix.mobj; copyTV(J->L, basev+0, &ix.mobjv);
@@ -979,7 +979,7 @@ static TRef rec_mm_len(jit_State *J, TRef tr, TValue *tv)
 /* Call a comparison metamethod. */
 static void rec_mm_callcomp(jit_State *J, RecordIndex *ix, int op)
 {
-  BCReg func = rec_mm_prep(J, (op&1) ? lj_cont_condf : lj_cont_condt);
+  BCReg func = rec_mm_prep(J, (op&1) ? (ASMFunction)lj_vm_fn__cont_condf : (ASMFunction)lj_vm_fn__cont_condt);
   TRef *base = J->base + func + LJ_FR2;
   TValue *tv = J->L->base + func + LJ_FR2;
   base[-LJ_FR2] = ix->mobj; base[1] = ix->val; base[2] = ix->key;
@@ -1297,7 +1297,7 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
       lj_trace_err(J, LJ_TRERR_NOMM);
   handlemm:
     if (tref_isfunc(ix->mobj)) {  /* Handle metamethod call. */
-      BCReg func = rec_mm_prep(J, ix->val ? lj_cont_nop : lj_cont_ra);
+      BCReg func = rec_mm_prep(J, ix->val ? (ASMFunction)lj_vm_fn__cont_nop : (ASMFunction)lj_vm_fn__cont_ra);
       TRef *base = J->base + func + LJ_FR2;
       TValue *tv = J->L->base + func + LJ_FR2;
       base[-LJ_FR2] = ix->mobj; base[1] = ix->tab; base[2] = ix->key;

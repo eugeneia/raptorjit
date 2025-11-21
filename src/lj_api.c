@@ -1142,7 +1142,7 @@ LUA_API int lua_yield(lua_State *L, int nresults)
       TValue *top = L->top;
       hook_leave(g);
       (top++)->u64 = cframe_multres(cf);
-      setcont(top, lj_cont_hook);
+      setcont(top, (ASMFunction)lj_vm_fn__cont_hook);
       if (LJ_FR2) top++;
       setframe_pc(top, cframe_pc(cf)-1);
       if (LJ_FR2) top++;

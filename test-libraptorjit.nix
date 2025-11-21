@@ -11,8 +11,8 @@ let csrc = writeScript "test.c" ''
   }
 ''; in
 
-runCommand "test-libraptorjit" { nativeBuildInputs = [ gcc raptorjit ]; } ''
-  gcc -lraptorjit-5.1 -o ./test ${csrc}
+runCommand "test-libraptorjit" { nativeBuildInputs = [ clang raptorjit ]; } ''
+  clang -lraptorjit-5.1 -o ./test ${csrc}
   ./test | tee $out
 ''
 

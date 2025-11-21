@@ -18,25 +18,6 @@
 
 /* -- Helper functions for generated machine code ------------------------- */
 
-double lj_vm_foldarith(double x, double y, int op)
-{
-  switch (op) {
-  case IR_ADD - IR_ADD: return x+y; break;
-  case IR_SUB - IR_ADD: return x-y; break;
-  case IR_MUL - IR_ADD: return x*y; break;
-  case IR_DIV - IR_ADD: return x/y; break;
-  case IR_MOD - IR_ADD: return x-lj_vm_floor(x/y)*y; break;
-  case IR_POW - IR_ADD: return pow(x, y); break;
-  case IR_NEG - IR_ADD: return -x; break;
-  case IR_ABS - IR_ADD: return fabs(x); break;
-  case IR_ATAN2 - IR_ADD: return atan2(x, y); break;
-  case IR_LDEXP - IR_ADD: return ldexp(x, (int)y); break;
-  case IR_MIN - IR_ADD: return x > y ? y : x; break;
-  case IR_MAX - IR_ADD: return x < y ? y : x; break;
-  default: return x;
-  }
-}
-
 int32_t lj_vm_modi(int32_t a, int32_t b)
 {
   uint32_t y, ua, ub;

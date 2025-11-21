@@ -98,7 +98,7 @@ static ptrdiff_t results_wanted(jit_State *J)
 /* Trace stitching: add continuation below frame to start a new trace. */
 static void recff_stitch(jit_State *J)
 {
-  ASMFunction cont = lj_cont_stitch;
+  ASMFunction cont = (ASMFunction)lj_vm_fn__cont_stitch;
   lua_State *L = J->L;
   TValue *base = L->base;
   BCReg nslot = J->maxslot + 1 + LJ_FR2;
