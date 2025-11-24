@@ -91,15 +91,6 @@ LJ_ASMF char lj_vm_text_begin[];
 
 /* VM registers and calling convention. */
 #define LJ_VMF __attribute__((preserve_none))
-// XXX - why is LLVM emitting zeroing under this CC? E.g.:
-//  0x0000555555592ab7 <+279>:   xor    ebx,ebx
-//  0x0000555555592ab9 <+281>:   xor    ecx,ecx
-//  0x0000555555592abb <+283>:   xor    edx,edx
-//  0x0000555555592abd <+285>:   xor    r8d,r8d
-//  0x0000555555592ac0 <+288>:   xor    r9d,r9d
-//  0x0000555555592ac3 <+291>:   xor    r10d,r10d
-//  0x0000555555592ac6 <+294>:   xor    r11d,r11d
-//  0x0000555555592ac9 <+297>:   jmp    0x55555558f250 <lj_vm_fn__call_meta>
 
 struct lj_vm_fn_tag;
 #define LJ_VM_FN_PARAM \
@@ -113,7 +104,7 @@ typedef LJ_VMF void (*lj_vm_fn_t)(LJ_VM_FN_PARAM);
 struct lj_vm_fn_tag { lj_vm_fn_t fn; };
 
 #define lj_vm_fn(name) lj_vm_fn__##name
-#define lj_vm_fn_declare(name) LJ_VMF void lj_vm_fn(name) (LJ_VM_FN_PARAM)
+#define lj_vm_fn_declare(name) LJ_ASMF LJ_VMF void lj_vm_fn(name)(LJ_VM_FN_PARAM)
 #define lj_vm_fn_call_f(fn) fn(LJ_VM_FN_ARGS)
 #define lj_vm_fn_call(name) lj_vm_fn_call_f(lj_vm_fn(name))
 
