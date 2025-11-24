@@ -114,6 +114,23 @@ void lj_ffh_coroutine_wrap_err(lua_State *L, lua_State *co);
  */
 #define KBASE kbase
 
+/* NARGS (number of arguments) register specifies the number of fixed
+ * arguments in a function call.
+ *
+ * NARGS is set by function calling instructions (e.g. CALL) and then
+ * read by function header instructions (e.g. FUNCF).
+ */
+#define NARGS nargs
+
+/* MULTRES (multiple results) register specifies the number of values
+ * provided by a multiple-valued instruction. The multiple values are
+ * counted separately from (in addition to) any fixed values.
+ *
+ * MULTRES is read by multiple value call instructions (e.g.
+ * CALLM) and set by multiple value return instructions (e.g. RETM, FUNCC).
+ */
+#define MULTRES multres
+
 /* STATE describes what kind of code the virtual machine is running.
  *
  * STATE=<0 is a complemented value from the LJ_VMST enum e.g.
@@ -123,26 +140,9 @@ void lj_ffh_coroutine_wrap_err(lua_State *L, lua_State *co);
  */
 #define STATE (G(L)->vmstate)
 
-/* NARGS (number of arguments) register specifies the number of fixed
- * arguments in a function call.
- *
- * NARGS is set by function calling instructions (e.g. CALL) and then
- * read by function header instructions (e.g. FUNCF).
- */
-#define NARGS (L->S.nargs)
-
-/* MULTRES (multiple results) register specifies the number of values
- * provided by a multiple-valued instruction. The multiple values are
- * counted separately from (in addition to) any fixed values.
- *
- * MULTRES is read by multiple value call instructions (e.g.
- * CALLM) and set by multiple value return instructions (e.g. RETM, FUNCC).
- */
-#define MULTRES (L->S.multres)
-
 /* Register CONT_BASE holds the stack base of the meta-method to continue from.
  */
-#define CONT_BASE (L->S.cont_base)
+#define CONT_BASE (L->cont_base)
 
 
 /* -- Utility functions --------------------------------------------------- */
@@ -523,16 +523,16 @@ static inline void vm_hotloop(lua_State *L, const BCIns *pc) {
 }
 
 /* Hot call detection: invoke trace recorder if function is hot. */
-static inline void vm_hotcall(lua_State *L, const BCIns *pc, TValue *base) {
+static inline void vm_hotcall(lua_State *L, const BCIns *PC, TValue *BASE, unsigned int NARGS) {
   /* Hotcount if JIT is on, but not while recording. */
   if ((G(L)->dispatchmode & (DISPMODE_JIT|DISPMODE_REC)) == DISPMODE_JIT) {
-    HotCount old_count = hotcount_get(L2GG(L), pc);
-    HotCount new_count = hotcount_set(L2GG(L), pc, old_count - HOTCOUNT_CALL);
+    HotCount old_count = hotcount_get(L2GG(L), PC);
+    HotCount new_count = hotcount_set(L2GG(L), PC, old_count - HOTCOUNT_CALL);
     if (new_count > old_count) {
       /* Hot call counter underflow. */
-      vm_savepc(L, pc);
+      vm_savepc(L, PC);
       TOP = BASE + NARGS;
-      uintptr_t hotcall = (uintptr_t)pc | 1; /* LSB set: marker for hot call. */
+      uintptr_t hotcall = (uintptr_t)PC | 1; /* LSB set: marker for hot call. */
       lj_dispatch_call(L, (BCIns *)hotcall);
       vm_savepc(L, 0); /* Invalidate for subsequent line hook. */
     }
@@ -1748,7 +1748,7 @@ routine(FUNCF) {
   /* IFUNCF: Fixed-arg Lua function, force interpreter */
   /* JFUNCF: Fixed-arg Lua function, JIT-compiled */
   if (OP == BC_FUNCF) {
-    vm_hotcall(L, PC, BASE);
+    vm_hotcall(L, PC, BASE, NARGS);
   }
   GCproto *pt = (GCproto*)((intptr_t)(PC-1) - sizeof(GCproto));
   TOP = BASE + A;
@@ -2641,7 +2641,8 @@ static inline void vm_enter(lua_State *L, int ftp, TValue *BASE) {
   BCIns BC = (0);
   const BCIns *PC = (0);
   const struct lj_vm_fn_tag *VM = (const struct lj_vm_fn_tag *)lj_vm_dispatch;
-  NARGS = TOP - BASE;
+  unsigned int NARGS = TOP - BASE;
+  unsigned int MULTRES = 0;
   *frame_link(BASE) = frame(ftp, BASE - L->base);
   lj_vm_fn_call(call);
 }
@@ -2651,7 +2652,8 @@ static inline void vm_reenter(lua_State *L, TValue *BASE) {
   BCIns BC = (0);
   const BCIns *PC = *frame_link(L->base);
   const struct lj_vm_fn_tag *VM = (const struct lj_vm_fn_tag *)lj_vm_dispatch;
-  MULTRES = TOP-BASE;
+  unsigned int NARGS = 0;
+  unsigned int MULTRES = TOP-BASE;
   lj_vm_fn_call(return);
 }
 
@@ -2661,7 +2663,8 @@ static inline void vm_unwind(lua_State *L) {
   BCIns BC = (0);
   const BCIns *PC = *frame_link(L->base);
   const struct lj_vm_fn_tag *VM = (const struct lj_vm_fn_tag *)lj_vm_dispatch;
-  MULTRES = 2;
+  unsigned int NARGS = 0;
+  unsigned int MULTRES = 2;
   setboolV(BASE, 0); /* Push FALSE for unsuccessful return from a pcall.  */
   lj_vm_fn_call(return);
 }

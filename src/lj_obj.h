@@ -595,11 +595,7 @@ struct lua_State {
   GCRef env;		/* Thread environment (table of globals). */
   CFrame *cframe;	/* End of C stack frame chain. */
   MSize stacksize;	/* True stack size (incl. LJ_STACK_EXTRA). */
-  /* Internal interpreter state. */
-  struct {
-    unsigned int nargs, multres;
-    TValue *cont_base;
-  } S;
+  TValue *cont_base; /* Interpreter continuation base. */
 };
 
 #define G(L)			(mref(L->glref, global_State))

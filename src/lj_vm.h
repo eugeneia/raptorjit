@@ -95,9 +95,10 @@ LJ_ASMF char lj_vm_text_begin[];
 struct lj_vm_fn_tag;
 #define LJ_VM_FN_PARAM \
   lua_State *L, TValue *base, const void *kbase, \
+  unsigned int nargs, unsigned int multres, \
   BCIns bc, const BCIns *pc, const struct lj_vm_fn_tag *vm
-
-#define LJ_VM_FN_ARGS L, base, kbase, bc, pc, vm
+  
+#define LJ_VM_FN_ARGS L, base, kbase, nargs, multres, bc, pc, vm
 
 typedef LJ_VMF void (*lj_vm_fn_t)(LJ_VM_FN_PARAM);
 
