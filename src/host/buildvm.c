@@ -1,6 +1,6 @@
 /*
 ** LuaJIT VM builder.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2023 Mike Pall. See Copyright Notice in luajit.h
 **
 ** This is a tool to build the hand-tuned assembler code required for
 ** LuaJIT's bytecode interpreter. It supports a variety of output formats
@@ -18,8 +18,10 @@
 #include "lj_obj.h"
 #include "lj_gc.h"
 #include "lj_bc.h"
+#if LJ_HASJIT
 #include "lj_ir.h"
 #include "lj_ircall.h"
+#endif
 #include "lj_frame.h"
 #include "lj_dispatch.h"
 #include "lj_ctype.h"
@@ -239,6 +241,7 @@ BCDEF(BCNAME)
   NULL
 };
 
+#if LJ_HASJIT
 const char *const ir_names[] = {
 #define IRNAME(name, m, m1, m2)	#name,
 IRDEF(IRNAME)
@@ -279,7 +282,9 @@ static const char *const trace_errors[] = {
 #include "lj_traceerr.h"
   NULL
 };
+#endif
 
+#if LJ_HASJIT
 static const char *lower(char *buf, const char *s)
 {
   char *p = buf;
@@ -290,6 +295,7 @@ static const char *lower(char *buf, const char *s)
   *p = '\0';
   return buf;
 }
+#endif
 
 /* Emit C source code for bytecode-related definitions. */
 static void emit_bcdef(BuildCtx *ctx)
@@ -307,15 +313,19 @@ static void emit_bcdef(BuildCtx *ctx)
 /* Emit VM definitions as Lua code for debug modules. */
 static void emit_vmdef(BuildCtx *ctx)
 {
+#if LJ_HASJIT
   char buf[80];
+#endif
   int i;
   fprintf(ctx->fp, "-- This is a generated file. DO NOT EDIT!\n\n");
-  fprintf(ctx->fp, "return {\n\n");
+  fprintf(ctx->fp, "assert(require(\"jit\").version == \"%s\", \"LuaJIT core/library version mismatch\")\n\n", LUAJIT_VERSION);
+  fprintf(ctx->fp, "module(...)\n\n");
 
   fprintf(ctx->fp, "bcnames = \"");
   for (i = 0; bc_names[i]; i++) fprintf(ctx->fp, "%-6s", bc_names[i]);
   fprintf(ctx->fp, "\",\n\n");
 
+#if LJ_HASJIT
   fprintf(ctx->fp, "irnames = \"");
   for (i = 0; ir_names[i]; i++) fprintf(ctx->fp, "%-6s", ir_names[i]);
   fprintf(ctx->fp, "\",\n\n");
@@ -344,6 +354,7 @@ static void emit_vmdef(BuildCtx *ctx)
   for (i = 0; trace_errors[i]; i++)
     fprintf(ctx->fp, "\"%s\",\n", trace_errors[i]);
   fprintf(ctx->fp, "},\n\n");
+#endif
 }
 
 /* -- Argument parsing ---------------------------------------------------- */
@@ -467,7 +478,8 @@ int main(int argc, char **argv)
     emit_asm_debug(ctx);
     break;
   case BUILD_peobj:
-    emit_peobj(ctx);
+    fprintf(stderr, "No support for peobj\n");
+    exit(1);
     break;
   case BUILD_raw:
     emit_raw(ctx);

@@ -7,7 +7,7 @@
 # Also works with MinGW and Cygwin on Windows.
 # Please check msvcbuild.bat for building with MSVC on Windows.
 #
-# Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+# Copyright (C) 2005-2023 Mike Pall. See Copyright Notice in luajit.h
 ##############################################################################
 
 MAJVER=  1
@@ -81,6 +81,14 @@ XCFLAGS=
 # with "make clean", followed by "make".
 # Note that most of these are NOT suitable for benchmarking or release mode!
 #
+# Use the system provided memory allocator (realloc) instead of the
+# bundled memory allocator. This is slower, but sometimes helpful for
+# debugging. This option cannot be enabled on x64 without GC64, since
+# realloc usually doesn't return addresses in the right address range.
+# OTOH this option is mandatory for Valgrind's memcheck tool on x64 and
+# the only way to get useful results from it for all other architectures.
+#XCFLAGS+= -DLUAJIT_USE_SYSMALLOC
+#
 # This define is required to run LuaJIT under Valgrind. The Valgrind
 # header files must be installed. You should enable debug information, too.
 # Use --suppressions=lj.supp to avoid some false positives.
@@ -146,6 +154,7 @@ TARGET_SONAME= libraptorjit-$(ABIVER).so.$(MAJVER)
 TARGET_DYLIBNAME= libraptorjit-$(ABIVER).$(MAJVER).dylib
 TARGET_DYLIBPATH= $(TARGET_LIBPATH)/$(TARGET_DYLIBNAME)
 TARGET_DLLNAME= lua$(NODOTABIVER).dll
+TARGET_DLLDOTANAME= libluajit-$(ABIVER).dll.a
 TARGET_XSHLDFLAGS= -shared -fPIC -Wl,-soname,$(TARGET_SONAME)
 TARGET_DYNXLDOPTS=
 
@@ -192,19 +201,19 @@ Host_XCFLAGS+= -DLUAJIT_OS=LUAJIT_OS_LINUX
 # Files and pathnames.
 ##############################################################################
 
-LJVM_C= lj_vm.c
 LJVM_O= lj_vm.o lj_vm_ffi_call_x64.o lj_vm_trace_call_x64.o
-LJVM_BOUT= $(LJVM_C)
 LJVM_MODE= elfasm
 
 LJLIB_O= lib_base.o lib_math.o lib_bit.o lib_string.o lib_table.o \
-	 lib_io.o lib_os.o lib_package.o lib_debug.o lib_jit.o lib_ffi.o
+	 lib_io.o lib_os.o lib_package.o lib_debug.o lib_jit.o lib_ffi.o \
+	 lib_buffer.o
 LJLIB_C= $(LJLIB_O:.o=.c)
 
-LJCORE_O= lj_gc.o lj_err.o lj_char.o lj_bc.o lj_obj.o lj_buf.o \
+LJCORE_O= lj_assert.o lj_gc.o lj_err.o lj_char.o lj_bc.o lj_obj.o lj_buf.o \
 	  lj_str.o lj_tab.o lj_func.o lj_udata.o lj_meta.o lj_debug.o \
-	  lj_state.o lj_dispatch.o lj_vmmath.o lj_strscan.o \
-	  lj_strfmt.o lj_strfmt_num.o lj_api.o lj_vmprofile.o \
+	  lj_prng.o lj_state.o lj_dispatch.o lj_vmmath.o \
+	  lj_strscan.o lj_strfmt.o lj_strfmt_num.o lj_serialize.o \
+	  lj_api.o lj_vmprofile.o \
 	  lj_lex.o lj_parse.o lj_bcread.o lj_bcwrite.o lj_load.o \
 	  lj_ir.o lj_opt_mem.o lj_opt_fold.o lj_opt_narrow.o \
 	  lj_opt_dce.o lj_opt_loop.o lj_opt_split.o lj_opt_sink.o \
@@ -212,7 +221,8 @@ LJCORE_O= lj_gc.o lj_err.o lj_char.o lj_bc.o lj_obj.o lj_buf.o \
 	  lj_asm.o lj_trace.o lj_gdbjit.o lj_auditlog.o \
 	  lj_ctype.o lj_cdata.o lj_cconv.o lj_ccall.o lj_ccallback.o \
 	  lj_carith.o lj_clib.o lj_cparse.o \
-	  lj_lib.o lib_aux.o lj_dwarf_dwo.o \
+	  lj_lib.o lj_alloc.o lib_aux.o \
+	  lj_dwarf_dwo.o \
 	  $(LJLIB_O) lib_init.o
 
 DWARF_DWO= lj_dwarf.dwo
@@ -260,6 +270,10 @@ reusevm:
 	cp -r * ../
 	@echo "Copied reference VM. Ready to build."
 
+update_reusevm:
+	cp lj_bcdef.h lj_ffdef.h lj_folddef.h lj_libdef.h lj_recdef.h lj_vm.S reusevm/
+	cp host/buildvm_arch.h reusevm/host/
+
 libbc:
 	./$(LUAJIT_T) host/genlibbc.lua -o host/buildvm_libbc.h $(LJLIB_C)
 	$(MAKE) all
@@ -306,10 +320,6 @@ host/buildvm_arch.h: $(DASM_DASC) $(DASM_DEP) $(DASM_DIR)/*.lua
 $(BUILDVM_T): $(BUILDVM_O)
 	$(E) "HOSTLINK  $@"
 	$(Q)$(HOST_CC) $(HOST_ALDFLAGS) -o $@ $(BUILDVM_O) $(HOST_ALIBS)
-
-$(LJVM_BOUT): $(BUILDVM_T)
-	$(E) "BUILDVM   $@"
-	$(Q)$(BUILDVM_X) -m $(LJVM_MODE) -o $@
 
 lj_bcdef.h: $(BUILDVM_T) $(LJLIB_C)
 	$(E) "BUILDVM   $@"

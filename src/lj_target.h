@@ -1,6 +1,6 @@
 /*
 ** Definitions for target CPU.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2023 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_TARGET_H
@@ -56,6 +56,9 @@ typedef uint32_t RegSP;
 ** Note that one set holds bits for both GPRs and FPRs.
 */
 typedef uint32_t RegSet;
+#define RSET_BITS		5
+#define rset_picktop_(rs)	((Reg)lj_fls(rs))
+#define rset_pickbot_(rs)	((Reg)lj_ffs(rs))
 
 #define RID2RSET(r)		(((RegSet)1) << (r))
 #define RSET_EMPTY		((RegSet)0)
@@ -65,8 +68,6 @@ typedef uint32_t RegSet;
 #define rset_set(rs, r)		(rs |= RID2RSET(r))
 #define rset_clear(rs, r)	(rs &= ~RID2RSET(r))
 #define rset_exclude(rs, r)	(rs & ~RID2RSET(r))
-#define rset_picktop(rs)	((Reg)lj_fls(rs))
-#define rset_pickbot(rs)	((Reg)lj_ffs(rs))
 
 /* -- Register allocation cost -------------------------------------------- */
 
@@ -131,7 +132,8 @@ typedef uint32_t RegCost;
 /* Return the address of an exit stub. */
 static LJ_AINLINE char *exitstub_addr_(char **group, uint32_t exitno)
 {
-  lua_assert(group[exitno / EXITSTUBS_PER_GROUP] != NULL);
+  lj_assertX(group[exitno / EXITSTUBS_PER_GROUP] != NULL,
+	     "exit stub group for exit %d uninitialized", exitno);
   return (char *)group[exitno / EXITSTUBS_PER_GROUP] +
 	 EXITSTUB_SPACING*(exitno % EXITSTUBS_PER_GROUP);
 }

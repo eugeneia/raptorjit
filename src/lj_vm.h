@@ -1,6 +1,6 @@
 /*
 ** Assembler VM interface definitions.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2023 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_VM_H
@@ -46,20 +46,29 @@ LJ_ASMF void lj_vm_exit_interp_notrack(void);
 /* Internal math helper functions. */
 static inline double lj_vm_floor(double a) { return floor(a); }
 static inline double lj_vm_ceil(double a)  { return ceil(a); }
+/* Required to prevent the C compiler from applying FMA optimizations.
+**
+** Yes, there's -ffp-contract and the FP_CONTRACT pragma ... in theory.
+** But the current state of C compilers is a mess in this regard.
+** Also, this function is not performance sensitive at all.
+*/
+LJ_NOINLINE static double lj_vm_floormul(double x, double y)
+{
+  return lj_vm_floor(x / y) * y;
+}
 static inline double lj_vm_foldarith(double x, double y, int op) {
   switch (op) {
   case IR_ADD - IR_ADD: return x+y; break;
   case IR_SUB - IR_ADD: return x-y; break;
   case IR_MUL - IR_ADD: return x*y; break;
   case IR_DIV - IR_ADD: return x/y; break;
-  case IR_MOD - IR_ADD: return x-lj_vm_floor(x/y)*y; break;
+  case IR_MOD - IR_ADD: return x-lj_vm_floormul(x, y); break;
   case IR_POW - IR_ADD: return pow(x, y); break;
   case IR_NEG - IR_ADD: return -x; break;
   case IR_ABS - IR_ADD: return fabs(x); break;
-  case IR_ATAN2 - IR_ADD: return atan2(x, y); break;
   case IR_LDEXP - IR_ADD: return ldexp(x, (int)y); break;
-  case IR_MIN - IR_ADD: return x > y ? y : x; break;
-  case IR_MAX - IR_ADD: return x < y ? y : x; break;
+  case IR_MIN - IR_ADD: return x < y ? x : y; break;
+  case IR_MAX - IR_ADD: return x > y ? x : y; break;
   default: return x;
   }
 }
@@ -73,15 +82,9 @@ LJ_ASMF int32_t lj_vm_modi(int32_t, int32_t);
 LJ_ASMF void lj_vm_floor_sse(void);
 LJ_ASMF void lj_vm_ceil_sse(void);
 LJ_ASMF void lj_vm_trunc_sse(void);
-LJ_ASMF void lj_vm_powi_sse(void);
-#define lj_vm_powi	NULL
 LJ_ASMF double lj_vm_trunc(double);
-#ifdef LUAJIT_NO_EXP2
-LJ_ASMF double lj_vm_exp2(double);
-#else
-#define lj_vm_exp2	exp2
-#endif
 LJ_ASMF int lj_vm_errno(void);
+LJ_ASMF TValue *lj_vm_next(GCtab *t, uint32_t idx);
 
 /* Start of the ASM code. */
 LJ_ASMF char lj_vm_text_begin[];
@@ -198,6 +201,8 @@ lj_vm_fn_declare(CALL);
 lj_vm_fn_declare(CALLT);
 lj_vm_fn_declare(ITERC);
 lj_vm_fn_declare(ITERN);
+lj_vm_fn_declare(IITERN);
+
 lj_vm_fn_declare(VARG);
 lj_vm_fn_declare(ISNEXT);
 

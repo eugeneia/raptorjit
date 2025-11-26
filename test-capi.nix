@@ -15,6 +15,7 @@ mkDerivation {
   src = lpty;
   phases = "unpackPhase buildPhase testPhase";
   buildInputs = [ luajit raptorjit which ];
+  LUA_CPATH = "./?.so";
   testPhase = ''
     ${raptorjit}/bin/raptorjit -e 'require "lpty"  print("Successfully loaded a C library.")' \
       > $out

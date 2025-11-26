@@ -1,6 +1,6 @@
 /*
 ** Error handling.
-** Copyright (C) 2005-2017 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2023 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #define lj_err_c
@@ -87,18 +87,22 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
     case FRAME_CONT:  /* Continuation frame. */
       if (frame_iscont_fficb(frame))
 	goto unwind_c;
+      /* fallthrough */
     case FRAME_VARG:  /* Vararg frame. */
       frame = frame_prevd(frame);
       break;
     case FRAME_PCALL:  /* FF pcall() frame. */
     case FRAME_PCALLH:  /* FF pcall() frame inside hook. */
       if (errcode) {
+	global_State *g;
 	if (errcode == LUA_YIELD) {
 	  frame = frame_prevd(frame);
 	  break;
 	}
+	g = G(L);
+	setgcref(g->cur_L, obj2gco(L));
 	if (frame_typep(frame) == FRAME_PCALL)
-	  hook_leave(G(L));
+	  hook_leave(g);
 	L->base = frame_prevd(frame) + 1;
 	L->cframe = cf;
 	unwindstack(L, L->base);
@@ -125,7 +129,6 @@ LJ_NOINLINE void lj_err_throw(lua_State *L, int errcode)
 {
   global_State *g = G(L);
   lj_trace_abort(g);
-  setmref(g->jit_base, NULL);
   L->status = LUA_OK;
   {
     void *cf = err_unwind(L, NULL, errcode);
@@ -148,6 +151,18 @@ LJ_NOINLINE void lj_err_mem(lua_State *L)
 {
   if (L->status == LUA_ERRERR+1)  /* Don't touch the stack during lua_open. */
     lj_vm_unwind_c(L->cframe, LUA_ERRMEM);
+  if (LJ_HASJIT) {
+    TValue *base = tvref(G(L)->jit_base);
+    if (base) L->base = base;
+  }
+  if (curr_funcisL(L)) {
+    L->top = curr_topL(L);
+    if (LJ_UNLIKELY(L->top > tvref(L->maxstack))) {
+      /* The current Lua frame violates the stack. Replace it with a dummy. */
+      L->top = L->base;
+      setframe_gc(L->base - 1 - LJ_FR2, obj2gco(L), LJ_TTHREAD);
+    }
+  }
   setstrV(L, L->top++, lj_err_str(L, LJ_ERR_ERRMEM));
   lj_err_throw(L, LUA_ERRMEM);
 }
@@ -187,6 +202,7 @@ static ptrdiff_t finderrfunc(lua_State *L)
       if (cframe_canyield(cf)) return 0;
       if (cframe_errfunc(cf) >= 0)
 	return cframe_errfunc(cf);
+      cf = cframe_prev(cf);
       frame = frame_prevd(frame);
       break;
     case FRAME_PCALL:
@@ -195,7 +211,7 @@ static ptrdiff_t finderrfunc(lua_State *L)
 	return savestack(L, frame_prevd(frame)+1);  /* xpcall's errorfunc. */
       return 0;
     default:
-      lua_assert(0);
+      lj_assertL(0, "bad frame type");
       return 0;
     }
   }
@@ -205,11 +221,13 @@ static ptrdiff_t finderrfunc(lua_State *L)
 /* Runtime error. */
 LJ_NOINLINE void lj_err_run(lua_State *L)
 {
-  ptrdiff_t ef = finderrfunc(L);
+  ptrdiff_t ef = tvref(G(L)->jit_base) ? 0 : finderrfunc(L);
   if (ef) {
-    TValue *errfunc = restorestack(L, ef);
-    TValue *top = L->top;
+    TValue *errfunc, *top;
+    lj_state_checkstack(L, LUA_MINSTACK * 2);  /* Might raise new error. */
     lj_trace_abort(G(L));
+    errfunc = restorestack(L, ef);
+    top = L->top;
     if (!tvisfunc(errfunc) || L->status == LUA_ERRERR) {
       setstrV(L, top-1, lj_err_str(L, LJ_ERR_ERRERR));
       lj_err_throw(L, LUA_ERRERR);
@@ -224,12 +242,32 @@ LJ_NOINLINE void lj_err_run(lua_State *L)
   lj_err_throw(L, LUA_ERRRUN);
 }
 
+/* Stack overflow error. */
+void lj_err_stkov(lua_State *L)
+{
+  lj_debug_addloc(L, err2msg(LJ_ERR_STKOV), L->base-1, NULL);
+  lj_err_run(L);
+}
+
+/* Rethrow error after doing a trace exit. */
+LJ_NOINLINE void lj_err_trace(lua_State *L, int errcode)
+{
+  if (errcode == LUA_ERRRUN)
+    lj_err_run(L);
+  else
+    lj_err_throw(L, errcode);
+}
+
 /* Formatted runtime error message. */
 LJ_NORET LJ_NOINLINE static void err_msgv(lua_State *L, ErrMsg em, ...)
 {
   const char *msg;
   va_list argp;
   va_start(argp, em);
+  if (LJ_HASJIT) {
+    TValue *base = tvref(G(L)->jit_base);
+    if (base) L->base = base;
+  }
   if (curr_funcisL(L)) L->top = curr_topL(L);
   msg = lj_strfmt_pushvf(L, err2msg(em), argp);
   va_end(argp);
@@ -292,9 +330,9 @@ LJ_NOINLINE void lj_err_optype_call(lua_State *L, TValue *o)
   const BCIns *pc = cframe_Lpc(L);
   if (((ptrdiff_t)pc & FRAME_TYPE) != FRAME_LUA) {
     const char *tname = lj_typename(o);
+    setframe_gc(o, obj2gco(L), LJ_TTHREAD);
     if (LJ_FR2) o++;
     setframe_pc(o, pc);
-    setframe_gc(o, obj2gco(L), LJ_TTHREAD);
     L->top = L->base = o+1;
     err_msgv(L, LJ_ERR_BADCALL, tname);
   }
@@ -304,22 +342,24 @@ LJ_NOINLINE void lj_err_optype_call(lua_State *L, TValue *o)
 /* Error in context of caller. */
 LJ_NOINLINE void lj_err_callermsg(lua_State *L, const char *msg)
 {
-  TValue *frame = L->base-1;
-  TValue *pframe = NULL;
-  if (frame_islua(frame)) {
-    pframe = frame_prevl(frame);
-  } else if (frame_iscont(frame)) {
-    if (frame_iscont_fficb(frame)) {
-      pframe = frame;
-      frame = NULL;
-    } else {
-      pframe = frame_prevd(frame);
-      /* Remove frame for FFI metamethods. */
-      if (frame_func(frame)->c.ffid >= FF_ffi_meta___index &&
-	  frame_func(frame)->c.ffid <= FF_ffi_meta___tostring) {
-	L->base = pframe+1;
-	L->top = frame;
-	setcframe_pc(cframe_raw(L->cframe), frame_contpc(frame));
+  TValue *frame = NULL, *pframe = NULL;
+  if (!(LJ_HASJIT && tvref(G(L)->jit_base))) {
+    frame = L->base-1;
+    if (frame_islua(frame)) {
+      pframe = frame_prevl(frame);
+    } else if (frame_iscont(frame)) {
+      if (frame_iscont_fficb(frame)) {
+	pframe = frame;
+	frame = NULL;
+      } else {
+	pframe = frame_prevd(frame);
+	/* Remove frame for FFI metamethods. */
+	if (frame_func(frame)->c.ffid >= FF_ffi_meta___index &&
+	    frame_func(frame)->c.ffid <= FF_ffi_meta___tostring) {
+	  L->base = pframe+1;
+	  L->top = frame;
+	  setcframe_pc(cframe_raw(L->cframe), frame_contpc(frame));
+	}
       }
     }
   }

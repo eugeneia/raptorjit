@@ -154,8 +154,8 @@ static inline TValue *copyTVs (lua_State *L, TValue *dst, TValue *src,
                                int need, int have) {
   int ncopy = min(need, have);
   int npad  = max(0, need - have);
-  lua_assert(need>=0);
-  lua_assert(have>=0);
+  lj_assertL(need>=0, "need cannot be negative");
+  lj_assertL(have>=0, "have cannot be negative");
   while (ncopy-- > 0) copyTV(L, dst++, src++);
   while (npad--  > 0) setnilV(dst++);
   return dst;
@@ -1588,6 +1588,11 @@ itern_end:
   { tailcall next(dispatch); }
 }
 
+routine(IITERN) {
+  // TODO: once we have hot countine ITERN, add interpreting version here.
+  tailcall next(ITERN);
+}
+
 routine(VARG) {
   /* VARG: Vararg: A, ..., A+B-2 = ... */
   int delta = link_delta(*frame_link(BASE));
@@ -1883,20 +1888,23 @@ routine(next) {
   if (NARGS < 2) setnilV(BASE+1);
   TOP = BASE;
   vm_savepc(L, *frame_link(BASE));
-  if (lj_tab_next(L, tabV(BASE), BASE+1)) {
+  int more = lj_tab_next(tabV(BASE), BASE+1, BASE+1);
+  if (more > 0) {
     /* Copy key and value to results. */
     PC = *frame_link(BASE);
     BASE += 1;
     MULTRES = 2;
     tailcall next(return);
-  } else {
+  } else if (!more) {
     /* End of traversal: return nil. */
     setnilV(frame_callee(BASE));
     PC = *frame_link(BASE);
     BASE -= 2;
     MULTRES = 1;
     tailcall next(return);
-  }
+  } else
+    /* Invalid key: throw from slow path. */
+    tailcall next(slowpath);
 }
 
 #define BC_pairs (BC__MAX+0x03)
@@ -2607,9 +2615,7 @@ routine(string_op) {
   vm_savepc(L, PC);
   lj_gc_check(L);
   GCstr *str = strV(BASE);
-  SBuf *buf = &G(L)->tmpbuf;
-  buf->L = L;
-  buf->p = buf->b;
+  SBuf *buf = lj_buf_tmp_(L);
   switch ((uint32_t)OP) {
   case BC_string_reverse:
     lj_buf_putstr_reverse(buf, str);
@@ -2817,3 +2823,5 @@ void lj_vm_ceil_sse(void)    { assert(0 && "NYI"); }
 void lj_vm_trunc_sse(void)   { assert(0 && "NYI"); }
 void lj_vm_powi_sse(void)    { assert(0 && "NYI"); }
 double lj_vm_trunc(double d) { assert(0 && "NYI"); }
+
+LJ_ASMF TValue *lj_vm_next(GCtab *t, uint32_t idx) { assert(0 && "NYI"); }
