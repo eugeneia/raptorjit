@@ -512,9 +512,9 @@ static void expr_toreg_nobranch(FuncState *fs, ExpDesc *e, BCReg reg)
   if (e->k == VKSTR) {
     ins = BCINS_AD(BC_KSTR, reg, const_str(fs, e));
   } else if (e->k == VKNUM) {
-    lua_Number n = expr_numberV(e);
-    int32_t k = lj_num2int(n);
-    if (checki16(k) && n == (lua_Number)k)
+    int64_t i64;
+    int32_t k;
+    if (lj_num2int_cond(expr_numberV(e), i64, k, checki16((int32_t)i64)))
       ins = BCINS_AD(BC_KSHORT, reg, (BCReg)(uint16_t)k);
     else
       ins = BCINS_AD(BC_KNUM, reg, const_num(fs, e));
@@ -1575,9 +1575,9 @@ static void expr_index(FuncState *fs, ExpDesc *t, ExpDesc *e)
   /* Already called: expr_toval(fs, e). */
   t->k = VINDEXED;
   if (expr_isnumk(e)) {
-    lua_Number n = expr_numberV(e);
-    int32_t k = lj_num2int(n);
-    if (checku8(k) && n == (lua_Number)k) {
+    int64_t i64;
+    int32_t k;
+    if (lj_num2int_cond(expr_numberV(e), i64, k, checku8((int32_t)i64))) {
       t->u.s.aux = BCMAX_C+1+(uint32_t)k;  /* 256..511: const byte key */
       return;
     }

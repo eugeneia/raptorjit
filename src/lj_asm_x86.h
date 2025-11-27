@@ -705,25 +705,25 @@ static void asm_conv(ASMState *as, IRIns *ir)
     } else {
       Reg dest = ra_dest(as, ir, RSET_GPR);
       x86Op op = st == IRT_NUM ? XO_CVTTSD2SI : XO_CVTTSS2SI;
+      lj_assertA(!irt_isu32(ir->t), "bad CONV u32.fp emitted");
       if (irt_isu64(ir->t)) {
-	/* LJ_64: For inputs >= 2^63 add -2^64, convert again. */
+	/* For the indefinite result -2^63, add -2^64 and convert again. */
 	Reg tmp = ra_noreg(IR(lref)->r) ? ra_alloc1(as, lref, RSET_FPR) :
 					  ra_scratch(as, RSET_FPR);
 	MCLabel l_end = emit_label(as);
 	emit_rr(as, op, dest|REX_64, tmp);
 	if (st == IRT_NUM)
-	  emit_rma(as, XO_ADDSD, tmp, &as->J->k64[LJ_K64_M2P64_31]);
+	  emit_rma(as, XO_ADDSD, tmp, &as->J->k64[LJ_K64_M2P64]);
 	else
-	  emit_rma(as, XO_ADDSS, tmp, &as->J->k32[LJ_K32_M2P64_31]);
-	emit_sjcc(as, CC_NS, l_end);
-	emit_rr(as, XO_TEST, dest|REX_64, dest);  /* Check if dest negative. */
+	  emit_rma(as, XO_ADDSS, tmp, &as->J->k32[LJ_K32_M2P64]);
+	emit_sjcc(as, CC_NO, l_end);
+	emit_gmrmi(as, XG_ARITHi(XOg_CMP), dest|REX_64, 1);
 	emit_rr(as, op, dest|REX_64, tmp);
 	ra_left(as, tmp, lref);
+
       } else {
-	if (irt_isu32(ir->t))
-	  emit_rr(as, XO_MOV, dest, dest);  /* Zero hiword. */
 	emit_mrm(as, op,
-		 dest|((irt_is64(ir->t) || irt_isu32(ir->t)) ? REX_64 : 0),
+		 dest|((irt_is64(ir->t)) ? REX_64 : 0),
 		 asm_fuseload(as, lref, RSET_FPR));
       }
     }

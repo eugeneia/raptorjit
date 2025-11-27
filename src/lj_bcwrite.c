@@ -52,9 +52,9 @@ static void bcwrite_ktabk(BCWriteCtx *ctx, cTValue *o, int narrow)
     p = lj_buf_wmem(p, strdata(str), len);
   } else if (tvisnum(o)) {
     if (narrow) {  /* Narrow number constants to integers. */
-      lua_Number num = numV(o);
-      int32_t k = lj_num2int(num);
-      if (num == (lua_Number)k) {  /* -0 is never a constant. */
+      int64_t i64;
+      int32_t k;
+      if (lj_num2int_check(numV(o), i64, k)) {  /* -0 is never a constant. */
 	*p++ = BCDUMP_KTAB_INT;
 	p = lj_strfmt_wuleb128(p, k);
 	ctx->sb.w = p;
@@ -255,9 +255,8 @@ static void bcwrite_knum(BCWriteCtx *ctx, GCproto *pt)
     /* Write a 33 bit ULEB128 for the int (lsb=0) or loword (lsb=1). */
     if (o->u32.hi != LJ_KEYINDEX) {
       /* Narrow number constants to integers. */
-	    lua_Number num = numV(o);
-	    k = lj_num2int(num);
-	    if (num == (lua_Number)k) {  /* -0 is never a constant. */
+	    int64_t i64;
+	    if (lj_num2int_check(numV(o), i64, k)) {  /* -0 is never a constant. */
 	      p = lj_strfmt_wuleb128(p, 2*(uint32_t)k | ((uint32_t)k&0x80000000u));
 	      if (k < 0)
 	        p[-1] = (p[-1] & 7) | ((k>>27) & 0x18);

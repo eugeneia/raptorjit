@@ -438,7 +438,14 @@ static TRef crec_ct_ct(jit_State *J, CType *d, CType *s, TRef dp, TRef sp,
     /* fallthrough */
   case CCX(I, F):
     if (dt == IRT_CDATA || st == IRT_CDATA) goto err_nyi;
-    sp = emitconv(sp, dsize < 4 ? IRT_INT : dt, st, IRCONV_ANY);
+  conv_I_F:
+    if (dsize < 8) {
+      lj_needsplit(J);
+      sp = emitconv(sp, IRT_I64, st, IRCONV_ANY);
+      sp = emitconv(sp, dsize < 4 ? IRT_INT : dt, IRT_I64, 0);
+    } else {
+      sp = emitconv(sp, dt, st, IRCONV_ANY);
+    }
     goto xstore;
   case CCX(I, P):
   case CCX(I, A):
@@ -514,10 +521,9 @@ static TRef crec_ct_ct(jit_State *J, CType *d, CType *s, TRef dp, TRef sp,
     goto xstore;
   case CCX(P, F):
     if (st == IRT_CDATA) goto err_nyi;
-    /* The signed conversion is cheaper. x64 really has 47 bit pointers. */
-    sp = emitconv(sp, (dsize == 8) ? IRT_I64 : IRT_U32,
-		  st, IRCONV_ANY);
-    goto xstore;
+    /* The signed 64 bit conversion is cheaper. */
+    dt = (dsize == 8) ? IRT_I64 : IRT_U32;
+    goto conv_I_F;
 
   /* Destination is an array. */
   case CCX(A, A):
@@ -1775,23 +1781,23 @@ int recff_bit64_shift(jit_State *J, RecordFFData *rd)
   if (J->base[0] && tref_iscdata(J->base[1])) {
     tsh = crec_bit64_arg(J, ctype_get(cts, CTID_INT64),
 			 J->base[1], &rd->argv[1]);
-    if (!tref_isinteger(tsh))
-      tsh = emitconv(tsh, IRT_INT, tref_type(tsh), 0);
     J->base[1] = tsh;
   }
   id = crec_bit64_type(cts, &rd->argv[0]);
   if (id) {
     TRef tr = crec_bit64_arg(J, ctype_get(cts, id), J->base[0], &rd->argv[0]);
     uint32_t op = rd->data;
+    IRType t;
     if (!tsh) tsh = lj_opt_narrow_tobit(J, J->base[1]);
+    t = tref_isinteger(tsh) ? IRT_INT : tref_type(tsh);
     if (!(op < IR_BROL ? LJ_TARGET_MASKSHIFT : LJ_TARGET_MASKROT) &&
 	!tref_isk(tsh))
-      tsh = emitir(IRTI(IR_BAND), tsh, lj_ir_kint(J, 63));
+      tsh = emitir(IRT(IR_BAND, t), tsh, lj_ir_kint(J, 63));
 #ifdef LJ_TARGET_UNIFYROT
-      if (op == (LJ_TARGET_UNIFYROT == 1 ? IR_BROR : IR_BROL)) {
-	op = LJ_TARGET_UNIFYROT == 1 ? IR_BROL : IR_BROR;
-	tsh = emitir(IRTI(IR_NEG), tsh, tsh);
-      }
+    if (op == (LJ_TARGET_UNIFYROT == 1 ? IR_BROR : IR_BROL)) {
+      op = LJ_TARGET_UNIFYROT == 1 ? IR_BROL : IR_BROR;
+      tsh = emitir(IRT(IR_NEG, t), tsh, tsh);
+    }
 #endif
     tr = emitir(IRT(op, id-CTID_INT64+IRT_I64), tr, tsh);
     J->base[0] = emitir(IRTG(IR_CNEWI, IRT_CDATA), lj_ir_kint(J, id), tr);

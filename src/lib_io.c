@@ -315,7 +315,7 @@ LJLIB_CF(io_method_seek)
   if (o < L->top) {
     if (tvisstr(o)) lj_strscan_num(strV(o), o);
     else if (tvisnum(o))
-      ofs = (int64_t)numV(o);
+      ofs = lj_num2i64(numV(o));
     else if (!tvisnil(o))
       lj_err_argt(L, 3, LUA_TNUMBER);
   }

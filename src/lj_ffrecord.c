@@ -69,7 +69,7 @@ static int32_t argv2int(jit_State *J, TValue *o)
 {
   if (!lj_strscan_numberobj(o))
     lj_trace_err(J, LJ_TRERR_BADTYPE);
-  return lj_num2int(numV(o));
+  return numberVint(o);
 }
 
 /* Get runtime value of string argument. */

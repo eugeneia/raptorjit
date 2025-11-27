@@ -286,16 +286,15 @@ enum {
 };
 
 enum {
+  LJ_K64_M2P64,		/* -2^64 */
   LJ_K64_TOBIT,		/* 2^52 + 2^51 */
   LJ_K64_2P64,		/* 2^64 */
-  LJ_K64_M2P64,		/* -2^64 */
-  LJ_K64_M2P64_31 = LJ_K64_M2P64,
   LJ_K64__MAX,
 };
 #define LJ_K64__USED	(LJ_TARGET_X86ORX64 || LJ_TARGET_ARM64 || LJ_TARGET_MIPS)
 
 enum {
-  LJ_K32_M2P64_31,	/* -2^64 or -2^31 */
+  LJ_K32_M2P64,		/* -2^64 */
   LJ_K32__MAX
 };
 #define LJ_K32__USED	(LJ_TARGET_X86ORX64 || LJ_TARGET_PPC || LJ_TARGET_MIPS)
