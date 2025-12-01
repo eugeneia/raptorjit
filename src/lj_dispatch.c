@@ -38,9 +38,9 @@ void lj_dispatch_init(GG_State *GG)
   uint32_t i;
   ASMFunction *disp = GG->dispatch;
   for (i = 0; i < GG_LEN_SDISP; i++)
-    disp[GG_LEN_DDISP+i] = disp[i] = makeasmfunc(lj_bc_ofs[i]);
+    disp[GG_LEN_DDISP+i] = disp[i] = makeasmfunc(lj_vm_dispatch[i]);
   for (i = GG_LEN_SDISP; i < GG_LEN_DDISP; i++)
-    disp[i] = makeasmfunc(lj_bc_ofs[i]);
+    disp[i] = makeasmfunc(lj_vm_dispatch[i]);
   /* The JIT engine is off by default. luaopen_jit() turns it on. */
   disp[BC_FORL] = disp[BC_IFORL];
   disp[BC_ITERL] = disp[BC_IITERL];
@@ -83,19 +83,19 @@ void lj_dispatch_update(global_State *g)
 
     /* Hotcount if JIT is on, but not while recording. */
     if ((mode & (DISPMODE_JIT|DISPMODE_REC)) == DISPMODE_JIT) {
-      f_forl = makeasmfunc(lj_bc_ofs[BC_FORL]);
-      f_iterl = makeasmfunc(lj_bc_ofs[BC_ITERL]);
-      f_itern = makeasmfunc(lj_bc_ofs[BC_ITERN]);
-      f_loop = makeasmfunc(lj_bc_ofs[BC_LOOP]);
-      f_funcf = makeasmfunc(lj_bc_ofs[BC_FUNCF]);
-      f_funcv = makeasmfunc(lj_bc_ofs[BC_FUNCV]);
+      f_forl = makeasmfunc(lj_vm_dispatch[BC_FORL]);
+      f_iterl = makeasmfunc(lj_vm_dispatch[BC_ITERL]);
+      f_itern = makeasmfunc(lj_vm_dispatch[BC_ITERN]);
+      f_loop = makeasmfunc(lj_vm_dispatch[BC_LOOP]);
+      f_funcf = makeasmfunc(lj_vm_dispatch[BC_FUNCF]);
+      f_funcv = makeasmfunc(lj_vm_dispatch[BC_FUNCV]);
     } else {  /* Otherwise use the non-hotcounting instructions. */
       f_forl = disp[GG_LEN_DDISP+BC_IFORL];
       f_iterl = disp[GG_LEN_DDISP+BC_IITERL];
       f_itern = (ASMFunction)lj_vm_fn(IITERN);
       f_loop = disp[GG_LEN_DDISP+BC_ILOOP];
-      f_funcf = makeasmfunc(lj_bc_ofs[BC_IFUNCF]);
-      f_funcv = makeasmfunc(lj_bc_ofs[BC_IFUNCV]);
+      f_funcf = makeasmfunc(lj_vm_dispatch[BC_IFUNCF]);
+      f_funcv = makeasmfunc(lj_vm_dispatch[BC_IFUNCV]);
     }
     /* Init static counting instruction dispatch first (may be copied below). */
     disp[GG_LEN_DDISP+BC_FORL] = f_forl;
@@ -148,7 +148,7 @@ void lj_dispatch_update(global_State *g)
       uint32_t i;
       if ((mode & DISPMODE_CALL) == 0) {  /* No call hooks? */
 	for (i = GG_LEN_SDISP; i < GG_LEN_DDISP; i++)
-	  disp[i] = makeasmfunc(lj_bc_ofs[i]);
+	  disp[i] = makeasmfunc(lj_vm_dispatch[i]);
       } else {
 	for (i = GG_LEN_SDISP; i < GG_LEN_DDISP; i++)
 	  disp[i] = lj_vm_callhook;
@@ -440,7 +440,7 @@ out:
       (op == BC_FUNCF || op == BC_FUNCV))
     op = (BCOp)((int)op+(int)BC_IFUNCF-(int)BC_FUNCF);
   ERRNO_RESTORE
-  return makeasmfunc(lj_bc_ofs[op]);  /* Return static dispatch target. */
+  return makeasmfunc(lj_vm_dispatch[op]);  /* Return static dispatch target. */
 }
 
 /* Stitch a new trace. */

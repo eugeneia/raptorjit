@@ -94,20 +94,6 @@ static void libdef_module(BuildCtx *ctx, char *p, int arg)
   strcpy(modname, p);
 }
 
-static int find_ffofs(BuildCtx *ctx, const char *name)
-{
-  int i;
-  for (i = 0; i < ctx->nglob; i++) {
-    const char *gl = ctx->globnames[i];
-    if (gl[0] == 'f' && gl[1] == 'f' && gl[2] == '_' && !strcmp(gl+3, name)) {
-      return (int)((uint8_t *)ctx->glob[i] - ctx->code);
-    }
-  }
-  fprintf(stderr, "Error: undefined fast function %s%s\n",
-	  LABEL_PREFIX_FF, name);
-  exit(1);
-}
-
 static void libdef_func(BuildCtx *ctx, char *p, int arg)
 {
   if (arg != LIBINIT_CF)
@@ -145,9 +131,6 @@ static void libdef_func(BuildCtx *ctx, char *p, int arg)
     for (i = 1; p[i] && modname[i-1]; i++)
       if (p[i] == '_') p[i] = '.';
     fprintf(ctx->fp, "\"%s\",\n", p);
-  } else if (ctx->mode == BUILD_bcdef) {
-    if (arg != LIBINIT_CF)
-      fprintf(ctx->fp, ",\n%d", find_ffofs(ctx, p));
   }
   ffid++;
   regfunc = REGFUNC_OK;
@@ -442,7 +425,6 @@ void emit_lib(BuildCtx *ctx)
     fprintf(ctx->fp, "},\n\n");
   } else if (ctx->mode == BUILD_bcdef) {
     int i;
-    fprintf(ctx->fp, "\n};\n\n");
     fprintf(ctx->fp, "LJ_DATADEF const uint16_t lj_bc_mode[] = {\n");
     fprintf(ctx->fp, "BCDEF(BCMODE)\n");
     for (i = ffasmfunc-1; i > 0; i--)

@@ -86,11 +86,8 @@ LJ_ASMF double lj_vm_trunc(double);
 LJ_ASMF int lj_vm_errno(void);
 LJ_ASMF TValue *lj_vm_next(GCtab *t, uint32_t idx);
 
-/* Start of the ASM code. */
-LJ_ASMF char lj_vm_text_begin[];
-
 /* Bytecode offsets are relative to lj_vm_text_begin. */
-#define makeasmfunc(ofs)	((ASMFunction)(lj_vm_text_begin + (ofs)))
+#define makeasmfunc(f)	(ASMFunction)f
 
 /* VM registers and calling convention. */
 #define LJ_VMF __attribute__((preserve_none))

@@ -704,8 +704,6 @@ routine(cont_hook) {
 
 /* -- Bytecode implementations. --------------------------------------------*/
 
-char lj_vm_text_begin[0];
-
 static inline int lj_vm_compare (double x, double y, int op) {
   /* Compare two floats.
    *

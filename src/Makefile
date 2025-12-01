@@ -265,15 +265,6 @@ clean:
 	$(HOST_RM) $(ALL_RM)
 	$(HOST_RM) $(ALL_GEN)
 
-reusevm:
-	cd reusevm; \
-	cp -r * ../
-	@echo "Copied reference VM. Ready to build."
-
-update_reusevm:
-	cp lj_bcdef.h lj_ffdef.h lj_folddef.h lj_libdef.h lj_recdef.h lj_vm.S reusevm/
-	cp host/buildvm_arch.h reusevm/host/
-
 libbc:
 	./$(LUAJIT_T) host/genlibbc.lua -o host/buildvm_libbc.h $(LJLIB_C)
 	$(MAKE) all
@@ -298,24 +289,13 @@ depend:
 # Rules for generated files.
 ##############################################################################
 
-host/buildvm_arch.h: $(DASM_DASC) $(DASM_DEP) $(DASM_DIR)/*.lua
-	@command -v $(DASM) 2>/dev/null || { \
-	  echo "Error: Missing dependency (luajit) for bootstrapping the VM."; \
-	  echo "";                                                             \
-	  echo "Here are your options to build RaptorJIT:";                    \
-	  echo "  make reusevm     # copy reference VM from reusevm/";          \
-	  echo "  (install luajit) # satisfy the dependency";                   \
-	  echo "  nix-build        # use nix to satisfy the dependencies";      \
-	  echo "";                                                             \
-	  echo "Warning:";                                                     \
-	  echo "  Only reusevm when running a pristine copy of RaptorJIT from";\
-	  echo "  a repository that keeps the reference VM up-to-date.";       \
-	  echo "  (Otherwise you might mix some stale code into your build.)"; \
-	  echo;                                                                \
-	  exit 1;                                                              \
-	}
-	$(E) "DYNASM    $@"
-	$(Q)$(DASM) -o $@ $(DASM_DASC)
+BUILDVM_O= host/buildvm.o \
+	   host/buildvm_lib.o host/buildvm_fold.o
+BUILDVM_T= host/buildvm
+BUILDVM_X= $(BUILDVM_T)
+
+HOST_O= $(BUILDVM_O)
+HOST_T= $(BUILDVM_T)
 
 $(BUILDVM_T): $(BUILDVM_O)
 	$(E) "HOSTLINK  $@"

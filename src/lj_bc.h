@@ -260,6 +260,5 @@ static LJ_AINLINE int bc_isret(BCOp op)
 }
 
 LJ_DATA const uint16_t lj_bc_mode[];
-LJ_DATA const uint16_t lj_bc_ofs[];
 
 #endif

@@ -15,9 +15,6 @@ mkDerivation rec {
   patchPhase = ''
     substituteInPlace Makefile --replace "/usr/local" "$out"
   '';
-  configurePhase = ''
-    make reusevm
-  '';
   installPhase = ''
     make install PREFIX="$out"
   '';
