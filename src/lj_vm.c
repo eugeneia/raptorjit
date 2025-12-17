@@ -626,7 +626,7 @@ routine(cont_stitch) {
     if (prev->link) {
       /* Jump to stitched trace. */
       BC = BCINS_AD(OP, A, prev->link);
-      lj_vm_fn_call(exec_trace);
+      tailcall next(exec_trace);
     } else {
       /* Stitch a new trace to the previous trace. */
       J->L = L;
