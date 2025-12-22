@@ -24,13 +24,9 @@ NODOTABIVER= 51
 # removing the '#' in front of them. Make sure you force a full recompile
 # with "make clean", followed by "make" if you change any options.
 #
-# Since the assembler part does NOT maintain a frame pointer, it's pointless
-# to slow down the C part by not omitting it. Debugging, tracebacks and
-# unwinding are not affected -- the assembler part has frame unwind
-# information and GCC emits it where needed (x64) or with -g (see CCDEBUG).
+# We need zero-call-used-regs=skip to avoid emitting redundant saves
+# when using LLVM's preserve_none calling convention.
 CCOPT= -O2 -fomit-frame-pointer -fzero-call-used-regs=skip
-# Use this if you want to generate a smaller binary (but it's slower):
-#CCOPT= -Os -fomit-frame-pointer
 # Note: it's no longer recommended to use -O3 with GCC 4.x.
 # The I-Cache bloat usually outweighs the benefits from aggressive inlining.
 #
