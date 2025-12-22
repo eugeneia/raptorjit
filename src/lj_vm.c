@@ -203,9 +203,10 @@ BCDEF(BCENUM)
 
 /* Debug utilities. */
 
-static inline void printins (lua_State *L, BCIns bc) {
-  printf("%-6lu %-6s OP=%-3x A=%-3d B=%-3d C=%-3d D=%-5d stackdepth=%-3ld%s\n",
-    insctr, OP < BC__MAX ? bc_names[OP] : "FF",
+static inline void printins (lua_State *L, const BCIns *PC) {
+  BCIns BC = PC[0];
+  printf("%-6lu %p %-6s OP=%-3x A=%-3d B=%-3d C=%-3d D=%-5d stackdepth=%-3ld%s\n",
+    insctr, PC, OP < BC__MAX ? bc_names[OP] : "FF",
     OP, A, B, C, D, TOP - L->base,
     (G(L)->dispatchmode & DISPMODE_REC) ? " [rec]" : "");
 }
@@ -261,12 +262,12 @@ void printv(TValue *o)
 #define next_ptr(fn) lj_vm_fn_call_f(fn)
 
 routine_inline(dispatch) {
-  BC = *PC++;
 #ifdef LUA_VM_DEBUG
   insctr++;
   if (insctr >= insctr_tracefrom && insctr <= insctr_traceto)
-    printins(L, BC);
+    printins(L, PC);
 #endif
+  BC = *PC++;
   tailcall next_ptr(VM[OP].fn);
 }
 
