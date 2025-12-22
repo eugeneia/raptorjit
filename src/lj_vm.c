@@ -507,37 +507,71 @@ routine(continuation) {
 
 /* -- JIT trace recorder -------------------------------------------------- */
 
-/* Hot loop detection: invoke trace recorder if loop body is hot. */
-static inline void vm_hotloop(lua_State *L, const BCIns *pc) {
-  /* Hotcount if JIT is on, but not while recording. */
-  if ((G(L)->dispatchmode & (DISPMODE_JIT|DISPMODE_REC)) == DISPMODE_JIT) {
-    HotCount old_count = hotcount_get(L2GG(L), pc);
-    HotCount new_count = hotcount_set(L2GG(L), pc, old_count - HOTCOUNT_LOOP);
-    if (new_count > old_count) {
-      /* Hot loop counter underflow. */
-      jit_State *J = L2J(L);
-      vm_savepc(L, pc);
-      J->L = L;
-      lj_trace_hot(J, pc);
-    }
-  }
+/* Re-dispatch to static instruction. */
+routine_inline(redispatch) {
+  // PC points to next instruction, and current instruction might
+  // have been patched, so reload BC.
+  BC = PC[-1];
+  // Re-dispatch to static ins.
+  tailcall next_ptr(VM[OP+GG_LEN_DDISP].fn);
 }
 
-/* Hot call detection: invoke trace recorder if function is hot. */
-static inline void vm_hotcall(lua_State *L, const BCIns *PC, TValue *BASE, unsigned int NARGS) {
-  /* Hotcount if JIT is on, but not while recording. */
-  if ((G(L)->dispatchmode & (DISPMODE_JIT|DISPMODE_REC)) == DISPMODE_JIT) {
-    HotCount old_count = hotcount_get(L2GG(L), PC);
-    HotCount new_count = hotcount_set(L2GG(L), PC, old_count - HOTCOUNT_CALL);
-    if (new_count > old_count) {
-      /* Hot call counter underflow. */
-      vm_savepc(L, PC);
-      TOP = BASE + NARGS;
-      uintptr_t hotcall = (uintptr_t)PC | 1; /* LSB set: marker for hot call. */
-      lj_dispatch_call(L, (BCIns *)hotcall);
-      vm_savepc(L, 0); /* Invalidate for subsequent line hook. */
-    }
-  }
+/* Dispatch target for recording phase. */
+routine(record) {
+  // XXX - handle HOOK_VMEVENT, HOOK_ACTIVE
+  /* NB: cframe->multres is used by lj_dispatch_ins. */
+  ((CFrame *) cframe_raw(L->cframe))->multres = MULTRES + 1;
+  lj_dispatch_ins(L, PC);
+  BASE = L->base;
+  tailcall next(redispatch);
+}
+
+/* Hot loop detection. */
+static inline int hotloop(lua_State *L, const BCIns *pc) {
+  HotCount old_count = hotcount_get(L2GG(L), pc);
+  HotCount new_count = hotcount_set(L2GG(L), pc, old_count - HOTCOUNT_LOOP);
+  return new_count > old_count; /* Hot loop counter underflow. */
+}
+
+/* Invoke trace recorder for hot loop body. */
+routine(hotloop) {
+  vm_savepc(L, PC);
+  jit_State *J = L2J(L);
+  J->L = L;
+  lj_trace_hot(J, PC);
+  BASE = L->base; // needed?
+  tailcall next(redispatch);
+}
+
+/* Dispatch to call. */
+routine_inline(dispatch_call) {
+  ASMFunction fn = lj_dispatch_call(L, PC);
+  vm_savepc(L, 0); // Invalidate for subsequent line hook.
+  PC = (BCIns *)((uintptr_t)PC & -2); // Strip hot call marker.
+  BASE = L->base;
+  NARGS = L->top - L->base; // needed?
+  tailcall next_ptr(((lj_vm_fn_t)fn));
+}
+
+/* Dispatch target for call hooks. */
+routine(hook_call) {
+  vm_savepc(L, PC);
+  tailcall next(dispatch_call);
+}
+
+/* Hot call detection. */
+static inline int hotcall(lua_State *L, const BCIns *PC) {
+  HotCount old_count = hotcount_get(L2GG(L), PC);
+  HotCount new_count = hotcount_set(L2GG(L), PC, old_count - HOTCOUNT_CALL);
+  return new_count > old_count; /* Hot loop counter underflow. */
+}
+
+/* Invoke trace recorder for hot function. */
+routine(hotcall) {
+  vm_savepc(L, PC);
+  TOP = BASE + NARGS;
+  PC = (BCIns *)((uintptr_t)PC | 1); /* LSB set: marker for hot call. */
+  tailcall next(dispatch_call);
 }
 
 /* Execute a JIT compiled machine code trace.
@@ -635,6 +669,7 @@ routine(cont_stitch) {
       /* NB: cframe->multres is used by lj_dispatch_stitch. */
       ((CFrame *) cframe_raw(L->cframe))->multres = MULTRES + 1;
       lj_dispatch_stitch(J, PC);
+      BASE = L->base; // needed?
     }
   }
   tailcall next(dispatch);
@@ -1649,96 +1684,136 @@ routine(RET1) {
   tailcall next(return);
 }
 
+static inline TValue *for_idx(TValue *state) { return &state[0]; }
+static inline TValue *for_stop(TValue *state) { return &state[1]; }
+static inline TValue *for_step(TValue *state) { return &state[2]; }
+static inline TValue *for_ext(TValue *state) { return &state[3]; }
+
+static inline int for_init(TValue* state) {
+  double idx = numV(for_idx(state));
+  double stop = numV(for_stop(state));
+  double step = numV(for_step(state));
+  /* Copy loop index to stack. */
+  setnumV(for_ext(state), idx);
+  /* Check for termination */
+  return (step >= 0 && idx <= stop) || (step < 0 && stop <= idx);
+}
+
+static inline int for_next(TValue* state) {
+  double idx = numV(for_idx(state));
+  double stop = numV(for_stop(state));
+  double step = numV(for_step(state));
+  /* Update loop index. */
+  double next = idx + step;
+  setnumV(for_idx(state), next);
+  /* Copy loop index to stack. */
+  setnumV(for_ext(state), next);
+  /* Check for termination */
+  return (step >= 0 && next <= stop) || (step < 0 && stop <= next);
+}
+
 routine(FORI) {
   /* FORI: Numeric 'for' loop init. */
+  vm_savepc(L, PC);
+  /* Initialize loop parameters. */
+  lj_meta_for(L, BASE+A); 
+  if (!for_init(BASE+A))
+    branchPC(D);
+  tailcall next(dispatch);
+}
+
+routine(JFORI) {
   /* JFORI: Numeric 'for' loop init, JIT-compiled. */
   vm_savepc(L, PC);
-  TValue *state = BASE + A;
-  TValue *idx = state, *stop = state+1, *step = state+2, *ext = state+3;
   /* Initialize loop parameters. */
-  lj_meta_for(L, state);
-  /* Copy loop index to stack. */
-  setnumV(ext, idx->n);
-  /* Check for termination */
-  if ((step->n >= 0 && idx->n > stop->n) ||
-      (step->n <  0 && stop->n > idx->n)) {
-    branchPC(D);
+  lj_meta_for(L, BASE+A); 
+  /* Always branch in JFORI. */
+  branchPC(D);
+  if (!for_init(BASE+A))
     tailcall next(dispatch);
-  } else if (OP == BC_JFORI) {
-    /* Always branch in JFORI. */
+  /* Continue with trace in found in JFORL bytecode. */
+  BC = PC[-1];
+  tailcall next(exec_trace);
+}
+
+routine_inline(for_loop) {
+  if (!tvisnum(for_idx(BASE+A))  ||
+      !tvisnum(for_stop(BASE+A)) ||
+      !tvisnum(for_step(BASE+A))) {
+    vm_savepc(L, PC);
+    lj_meta_for(L, BASE+A);
+  }
+  if (for_next(BASE+A))
     branchPC(D);
-    /* Continue with trace in found in JFORL bytecode. */
-    BC = PC[-1];
-    tailcall next(exec_trace);
-  } else
-    tailcall next(dispatch);
+  tailcall next(dispatch);
 }
 
 routine(FORL) {
   /* FORL: Numeric 'for' loop */
-  /* JFORL: Numeric 'for' loop, jitted */
+  if (hotloop(L, PC))
+    tailcall next(hotloop);
+  tailcall next(for_loop);
+}
+
+routine(IFORL) {
   /* IFORL: Numeric 'for' loop, force interpreter */
-  if (OP == BC_FORL) {
-    vm_hotloop(L, PC);
+  tailcall next(for_loop);
+}
+
+routine(JFORL) {
+  /* JFORL: Numeric 'for' loop, jitted */
+  if (for_next(BASE+A))
+    tailcall next(exec_trace);
+  tailcall next(dispatch);
+}
+
+static inline int iter_next(TValue *state) {
+  if (!tvisnil(state)) {
+    /* Save control var. */
+    state[-1] = *(state);
+    return 1;
   }
-  TValue *state = BASE + A;
-  TValue *idx = state, *stop = state+1, *step = state+2, *ext = state+3;
-  if (OP == BC_JFORL) {
-    assert(tvisnum(stop));
-    assert(tvisnum(step));
-  } else if (!tvisnum(idx) || !tvisnum(stop) || !tvisnum(step))
-    lj_meta_for(L, state);
-  /* Update loop index. */
-  setnumV(idx, idx->n + step->n);
-  /* Copy loop index to stack. */
-  setnumV(ext, idx->n);
-  /* Check for termination */
-  if ((step->n >= 0 && idx->n <= stop->n) ||
-      (step->n <  0 && stop->n <= idx->n)) {
-    if (OP == BC_JFORL) {
-      tailcall next(exec_trace);
-    } else {
-      branchPC(D);
-      tailcall next(dispatch);
-    }
-  } else
-    tailcall next(dispatch);
+  return 0;
 }
 
 routine(ITERL) {
   /* ITERL: Iterator 'for' loop. */
-  /* IITERL: Iterator 'for' loop, force interpreter. */
-  if (OP == BC_ITERL) {
-    vm_hotloop(L, PC);
-  }
-  if (!tvisnil(BASE+A)) {
-    /* Save control var and branch. */
+  if (hotloop(L, PC))
+    tailcall next(hotloop);
+  if (iter_next(BASE+A))
     branchPC(D);
-    BASE[A-1] = *(BASE+A);
-  }
+  tailcall next(dispatch);
+}
+
+routine(IITERL) {
+  /* IITERL: Iterator 'for' loop, force interpreter. */
+  if (iter_next(BASE+A))
+    branchPC(D);
   tailcall next(dispatch);
 }
 
 routine(JITERL) {
   /* JITERL: Iterator 'for' loop, JIT-compiled. */
-  if (!tvisnil(BASE+A)) {
-    BASE[A-1] = *(BASE+A);
+  if (iter_next(BASE+A))
     tailcall next(exec_trace);
-  } else
-    tailcall next(dispatch);
+  tailcall next(dispatch);
 }
 
 routine(LOOP) {
   /* LOOP: Generic loop */
+  if (hotloop(L, PC))
+    tailcall next(hotloop);
+  tailcall next(dispatch);
+}
+
+routine(ILOOP) {
   /* ILOOP: Generic loop, force interpreter */
+  tailcall next(dispatch); // nop
+}
+
+routine(JLOOP) {
   /* JLOOP: Generic loop, JIT-compiled */
-  if (OP == BC_LOOP) {
-    vm_hotloop(L, PC);
-  }
-  if (OP == BC_JLOOP) {
-    tailcall next(exec_trace);
-  } else
-    tailcall next(dispatch);
+  tailcall next(exec_trace);
 }
 
 routine(JMP) {
@@ -1747,33 +1822,47 @@ routine(JMP) {
   tailcall next(dispatch);
 }
 
+static inline GCproto *func_proto(const BCIns *pc) {
+  return (GCproto *)((intptr_t)(pc-1) - sizeof(GCproto));
+}
+
+static inline TValue *func_top(
+  lua_State *L, TValue *base, unsigned int delta, unsigned int nargs
+) {
+  assert((L->top + delta + LUA_MINSTACK) <= mref(L->maxstack, TValue));
+  /* Fill missing args with nil. */
+  if (delta > nargs) copyTVs(L, base+nargs, NULL, delta-nargs, 0);
+  return base + delta;
+}
+
 routine(FUNCF) {
   /* FUNCF: Fixed-arg Lua function */
+  if (hotcall(L, PC))
+    tailcall next(hotcall);
+  KBASE = mref(func_proto(PC)->k, void);
+  TOP = func_top(L, BASE, A, NARGS);
+  tailcall next(dispatch);
+}
+
+routine(IFUNCF) {
   /* IFUNCF: Fixed-arg Lua function, force interpreter */
+  KBASE = mref(func_proto(PC)->k, void);
+  TOP = func_top(L, BASE, A, NARGS);
+  tailcall next(dispatch);
+}
+
+routine(JFUNCF) {
   /* JFUNCF: Fixed-arg Lua function, JIT-compiled */
-  if (OP == BC_FUNCF) {
-    vm_hotcall(L, PC, BASE, NARGS);
-  }
-  GCproto *pt = (GCproto*)((intptr_t)(PC-1) - sizeof(GCproto));
-  TOP = BASE + A;
-  KBASE = mref(pt->k, void);
-  assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
-  /* Fill missing args with nil. */
-  if (A > NARGS) copyTVs(L, BASE+NARGS, NULL, A-NARGS, 0);
-  if (OP == BC_JFUNCF) {
-    tailcall next(exec_trace);
-  } else
-    tailcall next(dispatch);
+  KBASE = mref(func_proto(PC)->k, void);
+  TOP = func_top(L, BASE, A, NARGS);
+  tailcall next(exec_trace);
 }
 
 routine(FUNCV) {
   /* FUNCV: Vararg Lua function */
-  /* IFUNCV: Vararg Lua function, force interpreter */
-  /* JFUNCV: Vararg Lua function, JIT-compiled */
-  assert(OP == BC_FUNCV && "NYI BYTECODE: IFUNCV/JFUNCV");
-  GCproto *pt = (GCproto*)((intptr_t)(PC-1) - sizeof(GCproto));
-  TOP = BASE + A;
+  GCproto *pt = func_proto(PC);
   KBASE = mref(pt->k, void);
+  TOP = BASE + A;
   assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
   /* Save base of frame containing all parameters. */
   TValue *oldbase = BASE;
@@ -1787,9 +1876,11 @@ routine(FUNCV) {
   tailcall next(dispatch);
 }
 
+/* NYI: IFUNCV: Vararg Lua function, force interpreter */
+/* NYI: JFUNCV: Vararg Lua function, JIT-compiled */
+
 routine(FUNCC) {
   /* FUNCC: Pseudo-header for C functions */
-  assert(OP == BC_FUNCC && "NYI BYTECODE: FUNCCW");
   /* 
   ** Call C function.
   */
@@ -1807,6 +1898,8 @@ routine(FUNCC) {
   MULTRES = nresults;
   tailcall next(return);
 }
+
+/* NYI: FUNCCW */
 
 
 /* -- Fast-paths --------------------------------------------------------- */
@@ -2645,7 +2738,7 @@ static inline void vm_enter(lua_State *L, int ftp, TValue *BASE) {
   const void *KBASE = (0);
   BCIns BC = (0);
   const BCIns *PC = (0);
-  const struct lj_vm_fn_tag *VM = (const struct lj_vm_fn_tag *)lj_vm_dispatch;
+  const struct lj_vm_fn_tag *VM = (const struct lj_vm_fn_tag *)L2GG(L)->dispatch;
   unsigned int NARGS = TOP - BASE;
   unsigned int MULTRES = 0;
   *frame_link(BASE) = frame(ftp, BASE - L->base);
@@ -2656,7 +2749,7 @@ static inline void vm_reenter(lua_State *L, TValue *BASE) {
   const void *KBASE = (0);
   BCIns BC = (0);
   const BCIns *PC = *frame_link(L->base);
-  const struct lj_vm_fn_tag *VM = (const struct lj_vm_fn_tag *)lj_vm_dispatch;
+  const struct lj_vm_fn_tag *VM = (const struct lj_vm_fn_tag *)L2GG(L)->dispatch;
   unsigned int NARGS = 0;
   unsigned int MULTRES = TOP-BASE;
   lj_vm_fn_call(return);
@@ -2667,7 +2760,7 @@ static inline void vm_unwind(lua_State *L) {
   const void *KBASE = (0);
   BCIns BC = (0);
   const BCIns *PC = *frame_link(L->base);
-  const struct lj_vm_fn_tag *VM = (const struct lj_vm_fn_tag *)lj_vm_dispatch;
+  const struct lj_vm_fn_tag *VM = (const struct lj_vm_fn_tag *)L2GG(L)->dispatch;
   unsigned int NARGS = 0;
   unsigned int MULTRES = 2;
   setboolV(BASE, 0); /* Push FALSE for unsuccessful return from a pcall.  */
@@ -2812,10 +2905,8 @@ int lj_vm_cpuid(uint32_t f, uint32_t res[4])       {
 }
 
 /* Dispatch targets for recording and hooks. */
-void lj_vm_record(void)   { assert(0 && "NYI"); }
 void lj_vm_inshook(void)  { assert(0 && "NYI"); }
 void lj_vm_rethook(void)  { assert(0 && "NYI"); }
-void lj_vm_callhook(void) { assert(0 && "NYI"); }
 
 void lj_vm_floor_sse(void)   { assert(0 && "NYI"); }
 void lj_vm_ceil_sse(void)    { assert(0 && "NYI"); }

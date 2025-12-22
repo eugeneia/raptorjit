@@ -118,7 +118,7 @@ void lj_dispatch_update(global_State *g)
 	}
       } else {
 	/* The recording dispatch also checks for hooks. */
-	ASMFunction f = (mode & DISPMODE_REC) ? lj_vm_record : lj_vm_inshook;
+	ASMFunction f = (mode & DISPMODE_REC) ? (ASMFunction)lj_vm_fn__record : lj_vm_inshook;
 	uint32_t i;
 	for (i = 0; i < GG_LEN_SDISP; i++)
 	  disp[i] = f;
@@ -151,7 +151,7 @@ void lj_dispatch_update(global_State *g)
 	  disp[i] = makeasmfunc(lj_vm_dispatch[i]);
       } else {
 	for (i = GG_LEN_SDISP; i < GG_LEN_DDISP; i++)
-	  disp[i] = lj_vm_callhook;
+	  disp[i] = (ASMFunction)lj_vm_fn__hook_call;
       }
     }
     if (!(mode & DISPMODE_CALL)) {  /* Overwrite dynamic counting ins. */

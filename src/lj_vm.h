@@ -32,10 +32,8 @@ LJ_ASMF double lj_vm_foldfpm(double x, int op);
 #endif
 
 /* Dispatch targets for recording and hooks. */
-LJ_ASMF void lj_vm_record(void);
 LJ_ASMF void lj_vm_inshook(void);
 LJ_ASMF void lj_vm_rethook(void);
-LJ_ASMF void lj_vm_callhook(void);
 
 /* Trace entry and exit handling. See lj_vm_trace_call_*.asm */
 LJ_ASMF void lj_vm_trace_call(void *tcs, void *mcode);
@@ -108,6 +106,10 @@ struct lj_vm_fn_tag { lj_vm_fn_t fn; };
 #define lj_vm_fn_declare(name) LJ_ASMF LJ_VMF void lj_vm_fn(name)(LJ_VM_FN_PARAM)
 #define lj_vm_fn_call_f(fn) fn(LJ_VM_FN_ARGS)
 #define lj_vm_fn_call(name) lj_vm_fn_call_f(lj_vm_fn(name))
+
+/* Dispatch targets for recording and hooks. */
+lj_vm_fn_declare(record);
+lj_vm_fn_declare(hook_call);
 
 /* Continuations for metamethods. */
 lj_vm_fn_declare(cont_cat);  /* Continue with concatenation. */
@@ -209,16 +211,24 @@ lj_vm_fn_declare(RET0);
 lj_vm_fn_declare(RET1);
 
 lj_vm_fn_declare(FORI);
+lj_vm_fn_declare(JFORI);
 lj_vm_fn_declare(FORL);
+lj_vm_fn_declare(IFORL);
+lj_vm_fn_declare(JFORL);
 
 lj_vm_fn_declare(ITERL);
+lj_vm_fn_declare(IITERL);
 lj_vm_fn_declare(JITERL);
 
 lj_vm_fn_declare(LOOP);
+lj_vm_fn_declare(ILOOP);
+lj_vm_fn_declare(JLOOP);
 
 lj_vm_fn_declare(JMP);
 
 lj_vm_fn_declare(FUNCF);
+lj_vm_fn_declare(IFUNCF);
+lj_vm_fn_declare(JFUNCF);
 lj_vm_fn_declare(FUNCV);
 lj_vm_fn_declare(FUNCC);
 
@@ -379,31 +389,31 @@ static lj_vm_fn_t lj_vm_dispatch[] = {
 
   /* Loops and branches. I/J = interp/JIT, I/C/L = init/call/loop. */
   lj_vm_fn(FORI),
-  lj_vm_fn(FORI),
+  lj_vm_fn(JFORI),
 
   lj_vm_fn(FORL),
-  lj_vm_fn(FORL),
-  lj_vm_fn(FORL),
+  lj_vm_fn(IFORL),
+  lj_vm_fn(JFORL),
 
   lj_vm_fn(ITERL),
-  lj_vm_fn(ITERL),
+  lj_vm_fn(IITERL),
   lj_vm_fn(JITERL),
 
   lj_vm_fn(LOOP),
-  lj_vm_fn(LOOP),
-  lj_vm_fn(LOOP),
+  lj_vm_fn(ILOOP),
+  lj_vm_fn(JLOOP),
 
   lj_vm_fn(JMP),
 
   /* Function headers. I/J = interp/JIT, F/V/C = fixarg/vararg/C func. */
   lj_vm_fn(FUNCF),
-  lj_vm_fn(FUNCF),
-  lj_vm_fn(FUNCF),
+  lj_vm_fn(IFUNCF),
+  lj_vm_fn(JFUNCF),
   lj_vm_fn(FUNCV),
   lj_vm_fn(FUNCV),
-  lj_vm_fn(FUNCV),
+  lj_vm_fn(NYI),
   lj_vm_fn(FUNCC),
-  lj_vm_fn(FUNCC),
+  lj_vm_fn(NYI),
 
   /* Fast-path pseudo ops. */
   lj_vm_fn(assert),
