@@ -559,7 +559,7 @@ routine(exec_trace) {
   J2G(J)->jit_base = BASE;
   J2G(J)->tmpbuf.L = L;
   J2GG(J)->tcs = &tcs;
-  tcs.state.gpr[GPR_DISPATCH] = (intptr_t)J2GG(J)->dispatch;
+  tcs.state.gpr[GPR_DISPATCH] = (intptr_t)VM;
   tcs.state.gpr[GPR_BASE] = (intptr_t)BASE;
   /* Call JIT compiled trace with call state. */
   lj_vm_trace_call(&tcs, trace->mcode);
