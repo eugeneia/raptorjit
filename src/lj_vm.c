@@ -176,7 +176,7 @@ static inline TValue *copyTVs (lua_State *L, TValue *dst, TValue *src,
 
 /* -- Debugging ----------------------------------------------------------- */
 
-// #define LUA_VM_DEBUG 1
+#define LUA_VM_DEBUG 1
 
 #ifdef LUA_VM_DEBUG
 /* Count of executed instructions for debugger prosperity. */
@@ -543,11 +543,19 @@ routine(hotloop) {
   tailcall next(redispatch);
 }
 
+#define DISPATCH_HOTCALL 1 /* LSB set: marker for hot call. */
+static inline BCIns *tagPC(const BCIns *pc, uintptr_t tag) {
+  return (BCIns *)((uintptr_t)pc | tag);
+}
+static inline BCIns *untagPC(const BCIns *pc, uintptr_t tag) {
+  return (BCIns *)((uintptr_t)pc & ~tag);
+}
+
 /* Dispatch to call. */
 routine_inline(dispatch_call) {
   ASMFunction fn = lj_dispatch_call(L, PC);
-  vm_savepc(L, 0); // Invalidate for subsequent line hook.
-  PC = (BCIns *)((uintptr_t)PC & -2); // Strip hot call marker.
+  vm_savepc(L, NULL); // Invalidate for subsequent line hook.
+  PC = untagPC(PC, DISPATCH_HOTCALL); // Strip hot call marker.
   BASE = L->base;
   NARGS = L->top - L->base; // needed?
   tailcall next_ptr(((lj_vm_fn_t)fn));
@@ -570,7 +578,7 @@ static inline int hotcall(lua_State *L, const BCIns *PC) {
 routine(hotcall) {
   vm_savepc(L, PC);
   TOP = BASE + NARGS;
-  PC = (BCIns *)((uintptr_t)PC | 1); /* LSB set: marker for hot call. */
+  PC = tagPC(PC, DISPATCH_HOTCALL); // Set hot call marker.
   tailcall next(dispatch_call);
 }
 

@@ -77,15 +77,16 @@ static uint64_t hotcount_decay_ts;
 /* Decay hotcounts every second. */
 int hotcount_decay (jit_State *J)
 {
-  uint64_t ts = gettime_ns();
-  int decay = (ts - hotcount_decay_ts) > 1000000000LL; /* 1s elapsed? */
-  if (decay) {
-    /* Reset hotcounts. */
-    lj_dispatch_init_hotcount(J2G(J));
-    trace_clearsnapcounts(J);
-    hotcount_decay_ts = ts;
-  }
-  return decay;
+  // uint64_t ts = gettime_ns();
+  // int decay = (ts - hotcount_decay_ts) > 1000000000LL; /* 1s elapsed? */
+  // if (decay) {
+  //   /* Reset hotcounts. */
+  //   lj_dispatch_init_hotcount(J2G(J));
+  //   trace_clearsnapcounts(J);
+  //   hotcount_decay_ts = ts;
+  // }
+  // return decay;
+  return 0;
 }
 
 

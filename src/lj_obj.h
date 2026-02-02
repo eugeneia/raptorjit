@@ -9,6 +9,8 @@
 #ifndef _LJ_OBJ_H
 #define _LJ_OBJ_H
 
+#define EXITSTATE_CHECKEXIT 1
+
 #include "lua.h"
 #include "lj_def.h"
 #include "lj_arch.h"

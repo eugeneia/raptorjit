@@ -101,7 +101,7 @@ XCFLAGS=
 #
 # Turn on assertions for the whole LuaJIT VM. This significantly slows down
 # everything. Use only if you suspect a problem with LuaJIT itself.
-#XCFLAGS+= -DLUA_USE_ASSERT
+XCFLAGS+= -DLUA_USE_ASSERT
 #
 ##############################################################################
 # You probably don't need to change anything below this line!
