@@ -1200,11 +1200,10 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov TAB:RB, [BASE]
   |  checktab TAB:RB, ->fff_fallback
   |  checknumtp [BASE+8], ->fff_fallback
-  |  movsd xmm0, qword [BASE+8]
+  |  cvttsd2si RAd, qword [BASE+8]
   |  mov PC, [BASE-8]
-  |  sseconst_1 xmm1, TMPR
-  |  addsd xmm0, xmm1
-  |  cvttsd2si RAd, xmm0
+  |  add RAd, 1
+  |  cvtsi2sd xmm0, RAd
   |  movsd qword [BASE-16], xmm0
   |  cmp RAd, TAB:RB->asize;  jae >2	// Not in array part?
   |  mov RD, TAB:RB->array
