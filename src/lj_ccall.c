@@ -51,7 +51,9 @@
     if (ccall_struct_arg(cc, cts, d, rcl, o, narg)) goto err_nyi; \
     nsp = cc->nsp; ngpr = cc->ngpr; nfpr = cc->nfpr; \
     continue; \
-  }  /* Pass all other structs by value on stack. */
+  } else {  /* Pass all other structs by value on stack. */ \
+    onstack = 1; \
+  }
 
 #define CCALL_HANDLE_COMPLEXARG \
   isfp = 2;  /* Pass complex in FPRs or on stack. Needs postprocessing. */
@@ -66,7 +68,7 @@
     } \
   } else {  /* Try to pass argument in GPRs. */ \
     /* Note that reordering is explicitly allowed in the x64 ABI. */ \
-    if (n <= 2 && ngpr + n <= maxgpr) { \
+    if (!onstack && n <= 2 && ngpr + n <= maxgpr) { \
       dp = &cc->gpr[ngpr]; \
       ngpr += n; \
       goto done; \
@@ -122,7 +124,7 @@ static int ccall_classify_struct(CTState *cts, CType *ct, int *rcl, CTSize ofs)
     fofs = ofs+ct->size;
     if (ctype_isfield(ct->info))
       ccall_classify_ct(cts, ctype_rawchild(cts, ct), rcl, fofs);
-    else if (ctype_isbitfield(ct->info))
+    else if (ctype_isbitfield(ct->info) && ctype_bitbsz(ct->info))
       rcl[(fofs >= 8)] |= CCALL_RCL_INT;  /* NYI: unaligned bitfields? */
     else if (ctype_isxattrib(ct->info, CTA_SUBTYPE))
       ccall_classify_struct(cts, ctype_rawchild(cts, ct), rcl, fofs);
@@ -161,8 +163,11 @@ static int ccall_struct_arg(CCallState *cc, CTState *cts, CType *d, int *rcl,
   if (ccall_struct_reg(cc, cts, dp, rcl)) {
     /* Register overflow? Pass on stack. */
     MSize nsp = cc->nsp, sz = rcl[1] ? 2*CTSIZE_PTR : CTSIZE_PTR;
+    MSize align = (1u << ctype_align(d->info)) - 1;
     if (nsp + sz > CCALL_SIZE_STACK)
       return 1;  /* Too many arguments. */
+    if (CCALL_ALIGN_STACKARG && align > CTSIZE_PTR-1)
+      nsp = (nsp + align) & ~align;  /* Align argument on stack. */
     cc->nsp = nsp + sz;
     memcpy((uint8_t *)cc->stack + nsp, dp, sz);
   }
@@ -193,6 +198,11 @@ static void ccall_struct_ret(CCallState *cc, int *rcl, uint8_t *dp, CTSize sz)
 
 /* -- MIPS64 ABI struct classification ---------------------------- */
 
+
+#ifndef ccall_struct_align
+/* Alignment of pass-by-value structs. */
+#define ccall_struct_align(cts, ct)	((ct)->info & CTF_ALIGN)
+#endif
 
 /* -- Common C call handling ---------------------------------------------- */
 
@@ -283,6 +293,7 @@ static int ccall_set_args(lua_State *L, CTState *cts, CType *ct,
     CTSize sz;
     MSize n, isfp = 0, isva = 0;
     void *dp, *rp = NULL;
+    int onstack = 0;
 
     if (fid) {  /* Get argument type from field. */
       CType *ctf = ctype_get(cts, fid);
@@ -321,7 +332,7 @@ static int ccall_set_args(lua_State *L, CTState *cts, CType *ct,
 
     /* Otherwise pass argument on stack. */
     if (CCALL_ALIGN_STACKARG) {  /* Align argument on stack. */
-      MSize align = (1u << ctype_align(d->info)) - 1;
+      MSize align = (1u << ctype_align(ccall_struct_align(cts, d))) - 1;
       if (rp)
 	align = CTSIZE_PTR-1;
       nsp = (nsp + align) & ~align;
