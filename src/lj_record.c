@@ -15,6 +15,7 @@
 #include "lj_meta.h"
 #include "lj_frame.h"
 #include "lj_ctype.h"
+#include "lj_crecord.h"
 #include "lj_bc.h"
 #include "lj_ff.h"
 #include "lj_ir.h"
@@ -2387,6 +2388,39 @@ void lj_record_ins(jit_State *J)
     else
       rc = rec_mm_arith(J, &ix, MM_pow);
     break;
+
+  /* -- Bit operators ----------------------------------------------------- */
+
+  case BC_BNOT:
+    if (tref_iscdata(rc)) {
+      rc = recff_bit64_bitop(J, rc, 0, rcv, NULL, IR_BNOT);
+      break;
+    }
+    rc = lj_opt_narrow_tobit(J, rc);
+    rc = emitir(IRTI(IR_BNOT), rc, 0);
+    break;
+
+  case BC_BAND: case BC_BOR: case BC_BXOR:
+    if (tref_iscdata(rb) || tref_iscdata(rc)) {
+      rc = recff_bit64_bitop(J, rb, rc, rbv, rcv, (int)op - (int)BC_BAND + (int)IR_BAND);
+      break;
+    }
+  recbit:
+    rb = lj_opt_narrow_tobit(J, rb);
+    rc = lj_opt_narrow_tobit(J, rc);
+    rc = emitir(IRTI((int)op - (int)BC_BAND + (int)IR_BAND), rb, rc);
+    break;
+
+  case BC_BSHL: case BC_BSHR: case BC_BSAR:
+    {
+      TRef xrb = rb, xrc = rc;
+      if (recff_bit64_shift(J, &xrb, &xrc, rbv, rcv, (int)op - (int)BC_BSHL + (int)IR_BSHL)) {
+	rc = xrb;
+	break;
+      }
+      rc = xrc;  /* Shift amount may have been converted. */
+    }
+    goto recbit;
 
   /* -- Miscellaneous ops ------------------------------------------------- */
 
