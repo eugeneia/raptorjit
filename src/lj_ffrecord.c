@@ -709,7 +709,7 @@ static void recff_bit_nary(jit_State *J, RecordFFData *rd)
 /* Record bit shifts. */
 static void recff_bit_shift(jit_State *J, RecordFFData *rd)
 {
-  if (recff_bit64_shift(J, rd))
+  if (recff_bit64_shift(J, &J->base[0], &J->base[1], &rd->argv[0], &rd->argv[1], rd->data))
     return;
   {
     TRef tr = lj_opt_narrow_tobit(J, J->base[0]);
