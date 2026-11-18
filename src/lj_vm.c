@@ -1022,15 +1022,18 @@ routine(UNM) {
   tailcall next(dispatch);
 }
 
-routine(meta_len) {
-    BASE = lj_meta_len(L, BASE+D);
-    NARGS = 1;
-    tailcall next(continuation);
+routine(table_len) {
+  setnumV(BASE+A, lj_tab_len(tabV(BASE+D)));
+  tailcall next(dispatch);
 }
 
-routine(table_len) {
-     setnumV(BASE+A, lj_tab_len(tabV(BASE+D)));
-      tailcall next(dispatch);
+routine(meta_len) {
+  TValue *mbase = lj_meta_len(L, BASE+D);
+  if (!mbase)
+    tailcall next(table_len);
+  NARGS = 2; // Binop call for compatibility.
+  BASE = mbase;
+  tailcall next(continuation);
 }
 
 routine(LEN) {
