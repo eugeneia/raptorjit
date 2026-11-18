@@ -620,6 +620,7 @@ routine(exec_trace) {
     J2G(J)->jit_base = NULL;
     status = lj_trace_exit(J, &tcs.state);
     PC = cframe_pc(cframe_raw(L->cframe)); // set by lj_trace_exit
+    BASE = L->base; // updated by lj_trace_exit
   } else {
     L->base = BASE = (TValue*)tcs.state.gpr[GPR_BASE];
     status = (int)tcs.state.gpr[GPR_RET];
