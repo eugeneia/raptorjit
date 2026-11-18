@@ -556,8 +556,10 @@ routine_inline(dispatch_call) {
   ASMFunction fn = lj_dispatch_call(L, PC);
   vm_savepc(L, NULL); // Invalidate for subsequent line hook.
   PC = untagPC(PC, DISPATCH_HOTCALL); // Strip hot call marker.
-  BASE = L->base;
-  NARGS = L->top - L->base; // needed?
+  NARGS = TOP - BASE; // lj_dispatch_call mutates TOP
+  // PC points to next instruction, and current instruction might
+  // have been patched, so reload BC.
+  BC = PC[-1];
   tailcall next_ptr(((lj_vm_fn_t)fn));
 }
 
@@ -577,7 +579,6 @@ static inline int hotcall(lua_State *L, const BCIns *PC) {
 /* Invoke trace recorder for hot function. */
 routine(hotcall) {
   vm_savepc(L, PC);
-  TOP = BASE + NARGS;
   PC = tagPC(PC, DISPATCH_HOTCALL); // Set hot call marker.
   tailcall next(dispatch_call);
 }
