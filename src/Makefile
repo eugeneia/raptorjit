@@ -103,6 +103,9 @@ XCFLAGS=
 # everything. Use only if you suspect a problem with LuaJIT itself.
 #XCFLAGS+= -DLUA_USE_ASSERT
 #
+# Turn on RaptorJIT VM debugging instrumentation, and disable 
+#XCFLAGS+= -DRAPTORJIT_DEBUG
+#
 ##############################################################################
 # You probably don't need to change anything below this line!
 ##############################################################################

@@ -176,9 +176,7 @@ static inline TValue *copyTVs (lua_State *L, TValue *dst, TValue *src,
 
 /* -- Debugging ----------------------------------------------------------- */
 
-// #define LUA_VM_DEBUG 1
-
-#ifdef LUA_VM_DEBUG
+#ifdef RAPTORJIT_DEBUG
 /* Count of executed instructions for debugger prosperity. */
 static volatile uint64_t insctr;
 
@@ -262,7 +260,7 @@ void printv(TValue *o)
 #define next_ptr(fn) lj_vm_fn_call_f(fn)
 
 routine_inline(dispatch) {
-#ifdef LUA_VM_DEBUG
+#ifdef RAPTORJIT_DEBUG
   insctr++;
   if (insctr >= insctr_tracefrom && insctr <= insctr_traceto)
     printins(L, PC);

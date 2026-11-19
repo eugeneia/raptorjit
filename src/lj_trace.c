@@ -77,6 +77,9 @@ static uint64_t hotcount_decay_ts;
 /* Decay hotcounts every second. */
 int hotcount_decay (jit_State *J)
 {
+#ifdef RAPTORJIT_DEBUG
+  return 0; // Disable decay as its non-determistic wrt to time.
+#else
   uint64_t ts = gettime_ns();
   int decay = (ts - hotcount_decay_ts) > 1000000000LL; /* 1s elapsed? */
   if (decay) {
@@ -86,6 +89,7 @@ int hotcount_decay (jit_State *J)
     hotcount_decay_ts = ts;
   }
   return decay;
+#endif
 }
 
 
