@@ -18,3 +18,7 @@ src/lj_folddef.h
 src/lj_libdef.h
 src/lj_recdef.h
 src/raptorjit
+
+# Nix
+result
+result-*
