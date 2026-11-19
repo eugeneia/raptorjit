@@ -190,7 +190,7 @@ static volatile uint64_t insctr;
  * this variable accordingly to log the executed bytecodes from that point
  * onward.
  */
-static volatile uint64_t insctr_tracefrom = UINT64_MAX;
+static volatile uint64_t insctr_tracefrom = 0;
 static volatile uint64_t insctr_traceto = UINT64_MAX;
 
 /* Bytecode names. */

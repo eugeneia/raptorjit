@@ -32,7 +32,7 @@ CCOPT= -O2 -fomit-frame-pointer -fzero-call-used-regs=skip
 #
 #CCDEBUG=
 # Uncomment the next line to generate debug information:
-CCDEBUG= -gdwarf-2 -g3
+CCDEBUG= -gdwarf-2 -g3 -DLUA_USE_ASSERT
 #
 CCWARN= -Wall
 # Uncomment the next line to enable more warnings:
