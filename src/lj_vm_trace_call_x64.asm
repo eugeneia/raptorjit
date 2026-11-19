@@ -99,7 +99,7 @@ lj_vm_exit_handler:
 
 ;;; Reconstruct exit number.
         push rcx
-        mov ecx, dword [rsp+24] ;lower half of exit no
+        movzx ecx, byte [rsp+24] ;lower half of exit no
         mov ch, byte [rsp+16]   ;upper half of exit no
         mov dword [rax+12], ecx ;tcs->exitno (actually a uint32_t)
 
