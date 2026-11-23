@@ -235,7 +235,7 @@ LUAJIT_SO= libraptorjit.so
 LUAJIT_T= raptorjit
 
 ALL_T= $(LUAJIT_T) $(LUAJIT_A) $(LUAJIT_SO) $(HOST_T)
-ALL_HDRGEN= lj_bcdef.h lj_ffdef.h lj_libdef.h lj_recdef.h lj_folddef.h
+ALL_HDRGEN= lj_bcdef.h lj_ffdef.h lj_vmffdef.h lj_libdef.h lj_recdef.h lj_folddef.h
 ALL_GEN= $(ALL_HDRGEN)
 WIN_RM= *.obj *.lib *.exp *.dll *.exe *.manifest *.pdb *.ilk
 ALL_RM= $(ALL_T) *.o host/*.o $(WIN_RM)
@@ -307,6 +307,10 @@ lj_bcdef.h: $(BUILDVM_T) $(LJLIB_C)
 lj_ffdef.h: $(BUILDVM_T) $(LJLIB_C)
 	$(E) "BUILDVM   $@"
 	$(Q)$(BUILDVM_X) -m ffdef -o $@ $(LJLIB_C)
+
+lj_vmffdef.h: $(BUILDVM_T) $(LJLIB_C)
+	$(E) "BUILDVM   $@"
+	$(Q)$(BUILDVM_X) -m vmffdef -o $@ $(LJLIB_C)
 
 lj_libdef.h: $(BUILDVM_T) $(LJLIB_C)
 	$(E) "BUILDVM   $@"

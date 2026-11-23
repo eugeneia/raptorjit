@@ -120,6 +120,9 @@ static void libdef_func(BuildCtx *ctx, char *p, int arg)
     }
   } else if (ctx->mode == BUILD_ffdef) {
     fprintf(ctx->fp, "FFDEF(%s)\n", p);
+  } else if (ctx->mode == BUILD_vmffdef) {
+    if (arg != LIBINIT_CF)
+      fprintf(ctx->fp, "VMFFDEF(%s) // %x\n", p, ffasmfunc-1);
   } else if (ctx->mode == BUILD_recdef) {
     if (strlen(p) > sizeof(funcname)-1) {
       fprintf(stderr, "Error: function name too long: '%s'\n", p);
@@ -421,6 +424,8 @@ void emit_lib(BuildCtx *ctx)
     fprintf(ctx->fp,
       "#ifndef FF_NUM_ASMFUNC\n#define FF_NUM_ASMFUNC %d\n#endif\n\n",
       ffasmfunc);
+  } else if (ctx->mode == BUILD_vmffdef) {
+    fprintf(ctx->fp, "\n#undef VMFFDEF\n\n");
   } else if (ctx->mode == BUILD_vmdef) {
     fprintf(ctx->fp, "},\n\n");
   } else if (ctx->mode == BUILD_bcdef) {

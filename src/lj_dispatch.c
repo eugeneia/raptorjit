@@ -24,6 +24,7 @@
 #include "lj_trace.h"
 #include "lj_dispatch.h"
 #include "lj_vm.h"
+#include "lj_vm_dispatch.h"
 #include "luajit.h"
 
 /* Bump GG_NUM_ASMFF in lj_dispatch.h as needed. Ugly. */

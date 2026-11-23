@@ -245,6 +245,7 @@ int main(int argc, char **argv)
 
   switch (ctx->mode) {
   case BUILD_bcdef:
+  case BUILD_vmffdef:
     emit_lib(ctx);
     break;
   case BUILD_vmdef:

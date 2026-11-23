@@ -8,6 +8,7 @@
 
 #include "lj_obj.h"
 #include "lj_ir.h"
+#include "lj_bc.h"
 #include <math.h>
 #include <setjmp.h>
 
@@ -263,7 +264,7 @@ lj_vm_fn_declare(math_tan);
 lj_vm_fn_declare(math_frexp);
 lj_vm_fn_declare(math_modf);
 lj_vm_fn_declare(math_log);
-lj_vm_fn_declare(math_atan);
+lj_vm_fn_declare(math_atan2);
 
 lj_vm_fn_declare(math_ldexp);
 lj_vm_fn_declare(math_min);
@@ -287,197 +288,11 @@ lj_vm_fn_declare(string_op);
 
 lj_vm_fn_declare(NYI);
 
-static lj_vm_fn_t lj_vm_dispatch[] = {
-
-  /* Comparison ops. ORDER OPR. */
-  lj_vm_fn(ISLT),
-  lj_vm_fn(ISGE),
-  lj_vm_fn(ISLE),
-  lj_vm_fn(ISGT),
-  lj_vm_fn(ISEQV),
-  lj_vm_fn(ISNEV),
-  lj_vm_fn(ISEQS),
-  lj_vm_fn(ISNES),
-  lj_vm_fn(ISEQN),
-  lj_vm_fn(ISNEN),
-  lj_vm_fn(ISEQP),
-  lj_vm_fn(ISNEP),
-
-  /* Unary test and copy ops. */
-  lj_vm_fn(ISTC),
-  lj_vm_fn(ISFC),
-  lj_vm_fn(IST),
-  lj_vm_fn(ISF),
-  lj_vm_fn(ISTYPE),
-  lj_vm_fn(ISNUM),
-
-  /* Unary ops. */
-  lj_vm_fn(MOV),
-  lj_vm_fn(NOT),
-  lj_vm_fn(UNM),
-  lj_vm_fn(LEN),
-
-  /* Binary ops. ORDER OPR. VV last, POW must be next. */
-  lj_vm_fn(ADDVN),
-  lj_vm_fn(SUBVN),
-  lj_vm_fn(MULVN),
-  lj_vm_fn(DIVVN),
-  lj_vm_fn(MODVN),
-
-  lj_vm_fn(ADDNV),
-  lj_vm_fn(SUBNV),
-  lj_vm_fn(MULNV),
-  lj_vm_fn(DIVNV),
-  lj_vm_fn(MODNV),
-  
-  lj_vm_fn(ADDVV),
-  lj_vm_fn(SUBVV),
-  lj_vm_fn(MULVV),
-  lj_vm_fn(DIVVV),
-  lj_vm_fn(MODVV),
-  lj_vm_fn(POW),
-
-  lj_vm_fn(CAT),
-
-  /* Constant ops. */
-  lj_vm_fn(KSTR),
-  lj_vm_fn(KCDATA),
-  lj_vm_fn(KSHORT),
-  lj_vm_fn(KNUM),
-  lj_vm_fn(KPRI),
-  lj_vm_fn(KNIL),
-
-  /* Upvalue and function ops. */
-  lj_vm_fn(UGET),
-  lj_vm_fn(USETV),
-  lj_vm_fn(USETS),
-  lj_vm_fn(USETN),
-  lj_vm_fn(USETP),
-  lj_vm_fn(UCLO),
-  lj_vm_fn(FNEW),
-
-  /* Table ops. */
-  lj_vm_fn(TNEW),
-  lj_vm_fn(TDUP),
-  lj_vm_fn(GGET),
-  lj_vm_fn(GSET),
-  lj_vm_fn(TGETV),
-  lj_vm_fn(TGETS),
-  lj_vm_fn(TGETB),
-  lj_vm_fn(TGETR),
-  lj_vm_fn(TSETV),
-  lj_vm_fn(TSETS),
-  lj_vm_fn(TSETB),
-  lj_vm_fn(TSETM),
-  lj_vm_fn(TSETR),
-
-  /* Calls and vararg handling. T = tail call. */
-  lj_vm_fn(CALL),
-  lj_vm_fn(CALL),
-  lj_vm_fn(CALLT),
-  lj_vm_fn(CALLT),
-  lj_vm_fn(ITERC),
-  lj_vm_fn(ITERN),
-  lj_vm_fn(VARG),
-  lj_vm_fn(ISNEXT),
-
-  /* Returns. */
-  lj_vm_fn(RETM),
-  lj_vm_fn(RET),
-  lj_vm_fn(RET0),
-  lj_vm_fn(RET1),
-
-  /* Loops and branches. I/J = interp/JIT, I/C/L = init/call/loop. */
-  lj_vm_fn(FORI),
-  lj_vm_fn(JFORI),
-
-  lj_vm_fn(FORL),
-  lj_vm_fn(IFORL),
-  lj_vm_fn(JFORL),
-
-  lj_vm_fn(ITERL),
-  lj_vm_fn(IITERL),
-  lj_vm_fn(JITERL),
-
-  lj_vm_fn(LOOP),
-  lj_vm_fn(ILOOP),
-  lj_vm_fn(JLOOP),
-
-  lj_vm_fn(JMP),
-
-  /* Function headers. I/J = interp/JIT, F/V/C = fixarg/vararg/C func. */
-  lj_vm_fn(FUNCF),
-  lj_vm_fn(IFUNCF),
-  lj_vm_fn(JFUNCF),
-  lj_vm_fn(FUNCV),
-  lj_vm_fn(FUNCV),
-  lj_vm_fn(NYI),
-  lj_vm_fn(FUNCC),
-  lj_vm_fn(NYI),
-
-  /* Fast-path pseudo ops. */
-  lj_vm_fn(assert),
-  lj_vm_fn(type),
-  lj_vm_fn(next),
-  lj_vm_fn(pairs),
-  lj_vm_fn(ipairs_aux),
-  lj_vm_fn(ipairs),
-  lj_vm_fn(getmetatable),
-  lj_vm_fn(setmetatable),
-  lj_vm_fn(rawget),
-  lj_vm_fn(tonumber),
-  lj_vm_fn(tostring),
-  lj_vm_fn(pcall),
-  lj_vm_fn(xpcall),
-
-  lj_vm_fn(coroutine_yield),
-  lj_vm_fn(coroutine_resume),
-  lj_vm_fn(coroutine_resume),
-
-  lj_vm_fn(math_abs),
-  lj_vm_fn(math_floor),
-  lj_vm_fn(math_ceil),
-  lj_vm_fn(math_sqrt),
-  lj_vm_fn(math_log10), 
-  lj_vm_fn(math_exp),
-  lj_vm_fn(math_sin),
-  lj_vm_fn(math_cos),
-  lj_vm_fn(math_tan),
-  lj_vm_fn(NYI),
-  lj_vm_fn(NYI),
-  lj_vm_fn(NYI),
-  lj_vm_fn(NYI),
-  lj_vm_fn(NYI),
-  lj_vm_fn(NYI),
-
-  lj_vm_fn(math_frexp),
-  lj_vm_fn(math_modf),
-  lj_vm_fn(math_log),
-  lj_vm_fn(math_atan),
-  lj_vm_fn(NYI),
-  lj_vm_fn(NYI),
-  lj_vm_fn(math_ldexp),
-  lj_vm_fn(math_min),
-  lj_vm_fn(math_max),
-
-  lj_vm_fn(bit_tobit),
-  lj_vm_fn(bit_bnot),
-  lj_vm_fn(bit_bswap),
-  lj_vm_fn(bit_lshift),
-  lj_vm_fn(bit_rshift),
-  lj_vm_fn(bit_arshift),
-  lj_vm_fn(bit_rol),
-  lj_vm_fn(bit_ror),
-  lj_vm_fn(bit_band),
-  lj_vm_fn(bit_bor),
-  lj_vm_fn(bit_bxor),
-  lj_vm_fn(string_byte),
-  lj_vm_fn(string_char),
-  lj_vm_fn(string_sub),
-  lj_vm_fn(string_op),
-  lj_vm_fn(string_op),
-  lj_vm_fn(string_op),
-  lj_vm_fn(NYI)
-};
+typedef enum {
+  VMFF_ = BC__MAX-1,
+#define VMFFDEF(name)	VMFF_##name,
+#include "lj_vmffdef.h"
+  VMFF__MAX
+} VMFastFunc;
 
 #endif

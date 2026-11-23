@@ -1956,7 +1956,6 @@ routine(slowpath) {
 
 /* Fast-path implementations */
 
-#define BC_assert (BC__MAX+0x00)
 routine(assert) {
   if (NARGS < 1 || !tvistruecond(BASE))
     tailcall next(slowpath);
@@ -1966,7 +1965,6 @@ routine(assert) {
   tailcall next(return);
 }
 
-#define BC_type (BC__MAX+0x01)
 routine(type) {
   if (NARGS < 1)
     tailcall next(slowpath);
@@ -1983,7 +1981,6 @@ routine(type) {
   tailcall next(return);
 }
 
-#define BC_next (BC__MAX+0x02)
 routine(next) {
   if (NARGS < 1 || !tvistab(BASE))
     tailcall next(slowpath);
@@ -2010,13 +2007,11 @@ routine(next) {
     tailcall next(slowpath);
 }
 
-#define BC_pairs (BC__MAX+0x03)
 routine(pairs) {
   /* XXX - punt to fallback. */
   tailcall next(slowpath);
 }
 
-#define BC_ipairs_aux (BC__MAX+0x04)
 routine(ipairs_aux) {
   if (NARGS < 2 || !tvistab(BASE) || !tvisnum(BASE+1))
     tailcall next(slowpath);
@@ -2050,13 +2045,11 @@ stop:
   tailcall next(return);
 }
 
-#define BC_ipairs (BC__MAX+0x05)
 routine(ipairs) {
   /* XXX - punt to fallback. */
   tailcall next(slowpath);
 }
 
-#define BC_getmetatable (BC__MAX+0x06)
 routine(getmetatable) {
   if (NARGS <= 0)
     tailcall next(slowpath);
@@ -2083,13 +2076,11 @@ routine(getmetatable) {
   tailcall next(return);
 }
 
-#define BC_setmetatable (BC__MAX+0x07)
 routine(setmetatable) {
   /* XXX - punt to fallback. */
   tailcall next(slowpath);
 }
 
-#define BC_rawget (BC__MAX+0x08)
 routine(rawget) { // 0x69
   if (NARGS < 2 || !tvistab(BASE))
     tailcall next(slowpath);
@@ -2100,7 +2091,6 @@ routine(rawget) { // 0x69
   tailcall next(return);
 }
 
-#define BC_tonumber (BC__MAX+0x09)
 routine(tonumber) { 
   if (NARGS != 1 || !tvisnumber(BASE))
     tailcall next(slowpath);
@@ -2110,13 +2100,11 @@ routine(tonumber) {
   tailcall next(return);
 }
 
-#define BC_tostring (BC__MAX+0x0a)
 routine(tostring) {
   /* XXX - punt to fallback. */
   tailcall next(slowpath);
 }
 
-#define BC_pcall (BC__MAX+0x0b)
 routine(pcall) {
   if (NARGS < 1)
     tailcall next(slowpath);
@@ -2133,7 +2121,6 @@ routine(pcall) {
   tailcall next(call);
 }
 
-#define BC_xpcall (BC__MAX+0x0c)
 routine(xpcall) {
   if (NARGS < 2 || !tvisfunc(BASE+1))
     tailcall next(slowpath);
@@ -2179,7 +2166,6 @@ routine(xpcall) {
  * resume being the result values.
  */
 
-#define BC_coroutine_yield (BC__MAX+0x0d)
 routine(coroutine_yield) {
   /* Yielding from a coroutine means unlinking its CFrame and setting its
    * thread status to LUA_YIELD before returning to lj_vm_resume.
@@ -2194,8 +2180,6 @@ routine(coroutine_yield) {
   }
 }
 
-#define BC_coroutine_resume (BC__MAX+0x0e)
-#define BC_coroutine_wrap (BC__MAX+0x0f)
 routine(coroutine_resume) {
   /* The code for the resume and the wrap_aux fast functions are similar
    * enough to share most of their code. They differ as follows:
@@ -2216,7 +2200,7 @@ routine(coroutine_resume) {
    */
   lua_State *co;
   TValue *rbase, *rtop;
-  if (OP == BC_coroutine_resume) {
+  if (OP == (BCOp)VMFF_coroutine_resume) {
     /* resume: first argument must be a thread (the coroutine object). */
     if (NARGS >= 1 && tvisthread(BASE))
       co = threadV(BASE);
@@ -2240,7 +2224,7 @@ routine(coroutine_resume) {
       make room for frame link.) */
   rbase = co->top + (co->status == LUA_OK);
   /* Extend coroutine frame to hold remaining arguments. */
-  rtop = rbase + NARGS - (OP == BC_coroutine_resume); /* resume: -1 for `co' */
+  rtop = rbase + NARGS - (OP == (BCOp)VMFF_coroutine_resume); /* resume: -1 for `co' */
   /* Make sure we don't exceed the coroutine’s stack space. */
   if (rtop > mref(co->maxstack, TValue))
     tailcall next(slowpath);
@@ -2250,11 +2234,11 @@ routine(coroutine_resume) {
   vm_savepc(L, *frame_link(BASE));
   /* Clear arguments from stack. */
   TOP = BASE;
-  if (OP == BC_coroutine_resume)
+  if (OP == (BCOp)VMFF_coroutine_resume)
     /* resume: keep resumed thread in parent stack for GC. */
     TOP += 1;
   /* Copy arguments. resume: -1 for `co' */
-  copyTVs(L, rbase, TOP, rtop-rbase, NARGS - (OP == BC_coroutine_resume));
+  copyTVs(L, rbase, TOP, rtop-rbase, NARGS - (OP == (BCOp)VMFF_coroutine_resume));
   /* Resume coroutine at rbase. */
   lj_vm_resume(co, rbase, 0, 0);
   /* Reference the now-current lua_State. */
@@ -2269,7 +2253,7 @@ routine(coroutine_resume) {
     assert(TOP+nresults <= mref(L->maxstack, TValue));
     /* Copy coroutine results */
     copyTVs(L, TOP, co->base, nresults, nresults);
-    if (OP==BC_coroutine_resume) {
+    if (OP==(BCOp)VMFF_coroutine_resume) {
       /* resume: prepend true to results. */
       setboolV(BASE, 1);
       nresults += 1;
@@ -2279,7 +2263,7 @@ routine(coroutine_resume) {
     tailcall next(return);
   } else {
     /* Coroutine returned with error (at co->top-1). */
-    if (OP == BC_coroutine_wrap) {
+    if (OP == (BCOp)VMFF_coroutine_wrap_aux) {
       /* wrap_aux: throw error. */
       lj_ffh_coroutine_wrap_err(L, co);
     } else {
@@ -2296,7 +2280,6 @@ routine(coroutine_resume) {
   tailcall next(dispatch);
 }
 
-#define BC_math_abs (BC__MAX+0x10)
 routine(math_abs) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2309,7 +2292,6 @@ routine(math_abs) {
   tailcall next(return);
 }
 
-#define BC_math_floor (BC__MAX+0x11)
 routine(math_floor) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2322,7 +2304,6 @@ routine(math_floor) {
   tailcall next(return);
 }
 
-#define BC_math_ceil (BC__MAX+0x12)
 routine(math_ceil) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2335,7 +2316,6 @@ routine(math_ceil) {
   tailcall next(return);
 }
 
-#define BC_math_sqrt (BC__MAX+0x13)
 routine(math_sqrt) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2348,7 +2328,6 @@ routine(math_sqrt) {
   tailcall next(return);
 }
 
-#define BC_math_log10 (BC__MAX+0x14)
 routine(math_log10) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2361,7 +2340,6 @@ routine(math_log10) {
   tailcall next(return);
 }
 
-#define BC_math_exp (BC__MAX+0x15)
 routine(math_exp) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2374,7 +2352,6 @@ routine(math_exp) {
   tailcall next(return);
 }
 
-#define BC_math_sin (BC__MAX+0x16)
 routine(math_sin) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2387,7 +2364,6 @@ routine(math_sin) {
   tailcall next(return);
 }
 
-#define BC_math_cos (BC__MAX+0x17)
 routine(math_cos) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2400,7 +2376,6 @@ routine(math_cos) {
   tailcall next(return);
 }
 
-#define BC_math_tan (BC__MAX+0x18)
 routine(math_tan) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2413,7 +2388,6 @@ routine(math_tan) {
   tailcall next(return);
 }
 
-#define BC_math_frexp (BC__MAX+0x1F)
 routine(math_frexp) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2426,7 +2400,6 @@ routine(math_frexp) {
   tailcall next(return);
 }
 
-#define BC_math_modf (BC__MAX+0x20)
 routine(math_modf) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2439,7 +2412,6 @@ routine(math_modf) {
   tailcall next(return);
 }
 
-#define BC_math_log (BC__MAX+0x21)
 routine(math_log) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2452,8 +2424,7 @@ routine(math_log) {
   tailcall next(return);
 }
 
-#define BC_math_atan (BC__MAX+0x22)
-routine(math_atan) {
+routine(math_atan2) {
   if (NARGS < 2 || !tvisnum(BASE) || !tvisnum(BASE+1))
     tailcall next(slowpath);
 
@@ -2466,7 +2437,6 @@ routine(math_atan) {
   tailcall next(return);
 }
 
-#define BC_math_ldexp (BC__MAX+0x25)
 routine(math_ldexp) {
   if (NARGS < 2 || !tvisnum(BASE) || !tvisnum(BASE+1))
     tailcall next(slowpath);
@@ -2480,7 +2450,6 @@ routine(math_ldexp) {
   tailcall next(return);
 }
 
-#define BC_math_min (BC__MAX+0x26)
 routine(math_min) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2494,7 +2463,6 @@ routine(math_min) {
   tailcall next(return);
 }
 
-#define BC_math_max (BC__MAX+0x27)
 routine(math_max) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2508,7 +2476,6 @@ routine(math_max) {
   tailcall next(return);
 }
 
-#define BC_bit_tobit (BC__MAX+0x28)
 routine(bit_tobit) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2519,7 +2486,6 @@ routine(bit_tobit) {
   tailcall next(return);
 }
 
-#define BC_bit_bnot (BC__MAX+0x29)
 routine(bit_bnot) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2530,7 +2496,6 @@ routine(bit_bnot) {
   tailcall next(return);
 }
 
-#define BC_bit_bswap (BC__MAX+0x2a)
 routine(bit_bswap) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2541,7 +2506,6 @@ routine(bit_bswap) {
   tailcall next(return);
 }
 
-#define BC_bit_lshift (BC__MAX+0x2b)
 routine(bit_lshift) {
   if (NARGS < 2 || !tvisnum(BASE) || !tvisnum(BASE+1))
     tailcall next(slowpath);
@@ -2552,7 +2516,6 @@ routine(bit_lshift) {
   tailcall next(return);
 }
 
-#define BC_bit_rshift (BC__MAX+0x2c)
 routine(bit_rshift) {
   if (NARGS < 2 || !tvisnum(BASE) || !tvisnum(BASE+1))
     tailcall next(slowpath);
@@ -2563,7 +2526,6 @@ routine(bit_rshift) {
   tailcall next(return);
 }
 
-#define BC_bit_arshift (BC__MAX+0x2d)
 routine(bit_arshift) {
   if (NARGS < 2 || !tvisnum(BASE) || !tvisnum(BASE+1))
     tailcall next(slowpath);
@@ -2574,7 +2536,6 @@ routine(bit_arshift) {
   tailcall next(return);
 }
 
-#define BC_bit_rol (BC__MAX+0x2e)
 routine(bit_rol) {
   if (NARGS < 2 || !tvisnum(BASE) || !tvisnum(BASE+1))
     tailcall next(slowpath);
@@ -2586,7 +2547,6 @@ routine(bit_rol) {
   tailcall next(return);
 }
 
-#define BC_bit_ror (BC__MAX+0x2f)
 routine(bit_ror) {
   if (NARGS < 2 || !tvisnum(BASE) || !tvisnum(BASE+1))
     tailcall next(slowpath);
@@ -2598,7 +2558,6 @@ routine(bit_ror) {
   tailcall next(return);
 }
 
-#define BC_bit_band (BC__MAX+0x30)
 routine(bit_band) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2614,7 +2573,6 @@ routine(bit_band) {
   tailcall next(return);
 }
 
-#define BC_bit_bor (BC__MAX+0x31)
 routine(bit_bor) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2630,7 +2588,6 @@ routine(bit_bor) {
   tailcall next(return);
 }
 
-#define BC_bit_bxor (BC__MAX+0x32)
 routine(bit_bxor) {
   if (NARGS < 1 || !tvisnum(BASE))
     tailcall next(slowpath);
@@ -2646,7 +2603,6 @@ routine(bit_bxor) {
   tailcall next(return);
 }
 
-#define BC_string_byte (BC__MAX+0x33)
 routine(string_byte) {
   if (NARGS < 1 || !tvisstr(BASE)
       || (NARGS > 1 && !tvisnum(BASE+1))
@@ -2674,13 +2630,11 @@ routine(string_byte) {
   tailcall next(return);
 }
 
-#define BC_string_char (BC__MAX+0x34)
 routine(string_char) {
   /* XXX - punt to fallback. */
   tailcall next(slowpath);
 }
 
-#define BC_string_sub (BC__MAX+0x35)
 routine(string_sub) {
   if (NARGS < 2 || !tvisstr(BASE) || !tvisnum(BASE+1)
       || (NARGS > 2 && !tvisnum(BASE+2)))
@@ -2707,9 +2661,6 @@ routine(string_sub) {
   tailcall next(return);
 }
 
-#define BC_string_reverse (BC__MAX+0x36)
-#define BC_string_lower (BC__MAX+0x37)
-#define BC_string_upper (BC__MAX+0x38)
 routine(string_op) {
   if (NARGS < 1 || !tvisstr(BASE))
     tailcall next(slowpath);
@@ -2720,13 +2671,13 @@ routine(string_op) {
   GCstr *str = strV(BASE);
   SBuf *buf = lj_buf_tmp_(L);
   switch ((uint32_t)OP) {
-  case BC_string_reverse:
+  case VMFF_string_reverse:
     lj_buf_putstr_reverse(buf, str);
     break;
-  case BC_string_lower:
+  case VMFF_string_lower:
     lj_buf_putstr_lower(buf, str);
     break;
-  case BC_string_upper:
+  case VMFF_string_upper:
     lj_buf_putstr_upper(buf, str);
     break;
   default: assert(0 && "NYI: fast string operation");

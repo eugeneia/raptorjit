@@ -39,7 +39,7 @@ struct dasm_State;
 
 /* Build modes. */
 #define BUILDDEF(_) \
-  _(bcdef) _(ffdef) _(libdef) _(recdef) _(vmdef) \
+  _(bcdef) _(ffdef) _(vmffdef) _(libdef) _(recdef) _(vmdef) \
   _(folddef)
 
 typedef enum {
