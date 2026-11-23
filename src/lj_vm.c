@@ -254,7 +254,7 @@ void printv(TValue *o)
 /* Execute virtual machine instructions in a tail-recursive loop. */
 
 #define routine __attribute__((noinline)) lj_vm_fn_declare
-#define routine_inline __attribute__((always_inline)) lj_vm_fn_declare
+#define routine_inline __attribute__((always_inline)) inline lj_vm_fn_declare
 #define tailcall __attribute__((musttail)) return
 #define next(fn) lj_vm_fn_call(fn)
 #define next_ptr(fn) lj_vm_fn_call_f(fn)
