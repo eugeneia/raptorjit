@@ -1,6 +1,6 @@
 /*
 ** Assembler VM interface definitions.
-** Copyright (C) 2005-2023 Mike Pall. See Copyright Notice in luajit.h
+** Copyright (C) 2005-2026 Mike Pall. See Copyright Notice in luajit.h
 */
 
 #ifndef _LJ_VM_H
@@ -27,10 +27,15 @@ LJ_ASMF void lj_vm_unwind_rethrow(void);
 
 /* Miscellaneous functions. */
 LJ_ASMF int lj_vm_cpuid(uint32_t f, uint32_t res[4]);
-LJ_ASMF double lj_vm_foldfpm(double x, int op);
-#if !LJ_ARCH_HASFPU
-/* Declared in lj_obj.h: LJ_ASMF int32_t lj_vm_tobit(double x); */
-#endif
+LJ_ASMF LJ_CONSTF double lj_vm_foldarith(double x, double y, int op);
+LJ_ASMF LJ_CONSTF double lj_vm_foldfpm(double x, int op);
+
+/* Declared in lj_obj.h:
+** LJ_ASMF LJ_CONSTF int64_t lj_vm_num2int_check(double x);
+** LJ_ASMF LJ_CONSTF int64_t lj_vm_num2i64(double x);
+** LJ_ASMF LJ_CONSTF uint64_t lj_vm_num2u64(double x);
+** LJ_ASMF LJ_CONSTF int32_t lj_vm_tobit(double x);
+*/
 
 /* Dispatch targets for recording and hooks. */
 LJ_ASMF void lj_vm_inshook(void);
@@ -43,36 +48,10 @@ LJ_ASMF void lj_vm_exit_interp(void);
 LJ_ASMF void lj_vm_exit_interp_notrack(void);
 
 /* Internal math helper functions. */
-static inline double lj_vm_floor(double a) { return floor(a); }
-static inline double lj_vm_ceil(double a)  { return ceil(a); }
-/* Required to prevent the C compiler from applying FMA optimizations.
-**
-** Yes, there's -ffp-contract and the FP_CONTRACT pragma ... in theory.
-** But the current state of C compilers is a mess in this regard.
-** Also, this function is not performance sensitive at all.
-*/
-LJ_NOINLINE static double lj_vm_floormul(double x, double y)
-{
-  return lj_vm_floor(x / y) * y;
-}
-static inline double lj_vm_foldarith(double x, double y, int op) {
-  switch (op) {
-  case IR_ADD - IR_ADD: return x+y; break;
-  case IR_SUB - IR_ADD: return x-y; break;
-  case IR_MUL - IR_ADD: return x*y; break;
-  case IR_DIV - IR_ADD: return x/y; break;
-  case IR_MOD - IR_ADD: return x-lj_vm_floormul(x, y); break;
-  case IR_POW - IR_ADD: return pow(x, y); break;
-  case IR_NEG - IR_ADD: return -x; break;
-  case IR_ABS - IR_ADD: return fabs(x); break;
-  case IR_LDEXP - IR_ADD: return ldexp(x, (int)y); break;
-  case IR_MIN - IR_ADD: return x < y ? x : y; break;
-  case IR_MAX - IR_ADD: return x > y ? x : y; break;
-  default: return x;
-  }
-}
+LJ_ASMF LJ_CONSTF double lj_vm_floor(double);
+LJ_ASMF LJ_CONSTF double lj_vm_ceil(double);
 #ifdef LUAJIT_NO_LOG2
-LJ_ASMF double lj_vm_log2(double);
+LJ_ASMF LJ_CONSTF double lj_vm_log2(double);
 #else
 #define lj_vm_log2	log2
 #endif
@@ -81,7 +60,7 @@ LJ_ASMF int32_t lj_vm_modi(int32_t, int32_t);
 LJ_ASMF void lj_vm_floor_sse(void);
 LJ_ASMF void lj_vm_ceil_sse(void);
 LJ_ASMF void lj_vm_trunc_sse(void);
-LJ_ASMF double lj_vm_trunc(double);
+LJ_ASMF LJ_CONSTF double lj_vm_trunc(double);
 LJ_ASMF int lj_vm_errno(void);
 LJ_ASMF TValue *lj_vm_next(GCtab *t, uint32_t idx);
 
