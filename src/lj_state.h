@@ -6,11 +6,10 @@
 #ifndef _LJ_STATE_H
 #define _LJ_STATE_H
 
-#include <assert.h>
 #include "lj_obj.h"
 
 #define incr_top(L) \
-  (++L->top >= tvref(L->maxstack) && (lj_state_checkstack(L, 0), 0))
+  (++L->top >= tvref(L->maxstack) && (lj_state_growstack1(L), 0))
 
 #define savestack(L, p)		((char *)(p) - mref(L->stack, char))
 #define restorestack(L, n)	((TValue *)(mref(L->stack, char) + (n)))
@@ -23,9 +22,9 @@ LJ_FUNC int lj_state_cpgrowstack(lua_State *L, MSize need);
 
 static LJ_AINLINE void lj_state_checkstack(lua_State *L, MSize need)
 {
-  /* XXX This should throw an error rather than abort() */
-  assert(mref(L->maxstack, char) - (char *)L->top >=
-	 (ptrdiff_t)need*(ptrdiff_t)sizeof(TValue));
+  if ((mref(L->maxstack, char) - (char *)L->top) <=
+      (ptrdiff_t)need*(ptrdiff_t)sizeof(TValue))
+    lj_state_growstack(L, need);
 }
 
 LJ_FUNC lua_State *lj_state_new(lua_State *L);

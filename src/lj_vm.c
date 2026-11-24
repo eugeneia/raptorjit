@@ -173,6 +173,15 @@ static inline TValue *copyTVs (lua_State *L, TValue *dst, TValue *src,
 /* Branch to JMP:J. */
 #define branchPC(offset) { PC += (int)offset - BCBIAS_J; }
 
+/* Ensure we have enough stack space. */
+static inline void ensureStack (lua_State *L, const TValue *top)
+{
+  const TValue *maxstack = mref(L->maxstack, TValue);
+  const TValue *needstack = top + LUA_MINSTACK;
+  if (needstack > maxstack)
+    lj_state_growstack(L, (MSize)(needstack - maxstack));
+}
+
 
 /* -- Debugging ----------------------------------------------------------- */
 
@@ -1838,7 +1847,7 @@ static inline GCproto *func_proto(const BCIns *pc) {
 static inline TValue *func_top(
   lua_State *L, TValue *base, unsigned int delta, unsigned int nargs
 ) {
-  assert((L->top + delta + LUA_MINSTACK) <= mref(L->maxstack, TValue));
+  ensureStack(L, L->top + delta);
   /* Fill missing args with nil. */
   if (delta > nargs) copyTVs(L, base+nargs, NULL, delta-nargs, 0);
   return base + delta;
@@ -1872,7 +1881,7 @@ routine(FUNCV) {
   GCproto *pt = func_proto(PC);
   KBASE = mref(pt->k, void);
   TOP = BASE + A;
-  assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
+  ensureStack(L, TOP);
   /* Save base of frame containing all parameters. */
   TValue *oldbase = BASE;
   /* Base for new frame containing only fixed parameters. */
@@ -1896,7 +1905,7 @@ routine(FUNCC) {
   int nresults, resultofs;
   lua_CFunction *f = &funcV(frame_callee(BASE))->c.f; /* C function pointer */
   TOP = BASE + NARGS;
-  assert(TOP+LUA_MINSTACK <= mref(L->maxstack, TValue));
+  ensureStack(L, TOP);
   STATE = ~LJ_VMST_C;
   nresults = (*f)(L);
   STATE = ~LJ_VMST_INTERP;
@@ -1925,7 +1934,7 @@ routine(FUNCC) {
 routine(slowpath) {
   const BCIns *link = *frame_link(BASE);
   TOP = BASE + NARGS;
-  assert(TOP+1+LUA_MINSTACK <= mref(L->maxstack, TValue));
+  ensureStack(L, TOP);
   lua_CFunction *f = &funcV(frame_callee(BASE))->c.f; /* C function pointer */
   vm_savepc(L, link);
   int res = (*f)(L);
@@ -2248,7 +2257,7 @@ routine(coroutine_resume) {
     /* Clear coroutine stack. */
     co->top = co->base;
     /* Ensure we have stack space for coroutine results. */
-    assert(TOP+nresults <= mref(L->maxstack, TValue));
+    ensureStack(L, TOP+nresults);
     /* Copy coroutine results */
     copyTVs(L, TOP, co->base, nresults, nresults);
     if (OP==(BCOp)VMFF_coroutine_resume) {
@@ -2620,7 +2629,7 @@ routine(string_byte) {
   else
     end = min(end, (int)str->len);
   nresults = max(1+end-start, 0);
-  assert(BASE+nresults <= mref(L->maxstack, TValue));
+  ensureStack(L, BASE+nresults);
   for (i=0; i+start <= end; i++)
     setnumV(BASE+i, (uint8_t)(strdata(str)[i+start-1]));
   PC = *frame_link(BASE);

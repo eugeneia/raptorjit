@@ -9,8 +9,6 @@
 #define lj_api_c
 #define LUA_CORE
 
-#include <stdio.h>
-
 #include "lj_obj.h"
 #include "lj_gc.h"
 #include "lj_err.h"
@@ -155,7 +153,7 @@ LUA_API void lua_settop(lua_State *L, int idx)
     lj_checkapi(idx <= tvref(L->maxstack) - L->base, "bad stack slot %d", idx);
     if (L->base + idx > L->top) {
       if (L->base + idx >= tvref(L->maxstack))
-	lj_state_checkstack(L, (MSize)idx - (MSize)(L->top - L->base));
+	lj_state_growstack(L, (MSize)idx - (MSize)(L->top - L->base));
       do { setnilV(L->top++); } while (L->top < L->base + idx);
     } else {
       L->top = L->base + idx;

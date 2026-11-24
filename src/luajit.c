@@ -19,7 +19,6 @@
 #include "lj_vmprofile.h"
 
 #include "lj_arch.h"
-#include "lj_obj.h"
 #include "lj_auditlog.h"
 
 #include <unistd.h>
