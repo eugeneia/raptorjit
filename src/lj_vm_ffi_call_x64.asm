@@ -36,12 +36,12 @@ lj_vm_ffi_call:
 
 ;;; Copy stack slots.
         movzx ecx, byte [rbx+12] ;nsp
-        sub ecx, 1
+        sub ecx, 8
         js .args
 .stack:
-        mov rax, [rbx+rcx*8+192] ;stack
-        mov [rsp+rcx*8], rax
-        sub ecx, 1
+        mov rax, [rbx+rcx+192] ;stack
+        mov [rsp+rcx], rax
+        sub ecx, 8
         jns .stack
 
 ;;; Put arguments into registers.
