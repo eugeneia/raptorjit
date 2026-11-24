@@ -200,8 +200,7 @@ Host_XCFLAGS+= -DLUAJIT_OS=LUAJIT_OS_LINUX
 # Files and pathnames.
 ##############################################################################
 
-LJVM_O= lj_vm.o lj_vm_ffi_call_x64.o lj_vm_trace_call_x64.o
-LJVM_MODE= elfasm
+LJVM_O= lj_vm.o lj_vm_math.o lj_vm_ffi_call_x64.o lj_vm_trace_call_x64.o
 
 LJLIB_O= lib_base.o lib_math.o lib_bit.o lib_string.o lib_table.o \
 	 lib_io.o lib_os.o lib_package.o lib_debug.o lib_jit.o lib_ffi.o \

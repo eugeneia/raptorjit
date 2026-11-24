@@ -287,9 +287,7 @@ static inline void vm_savepc(lua_State *L, const BCIns *pc) {
  * range.
  */
 static inline int32_t tobit(TValue *n) {
-  static union {lua_Number n; uint64_t b;} bn;
-  bn.n = n->n + 6755399441055744.0; /* 2^52+2^51 */
-  return (int32_t)bn.b;
+  return lj_vm_tobit(n->n);
 }
 
 
@@ -2874,6 +2872,5 @@ void lj_vm_floor_sse(void)   { assert(0 && "NYI"); }
 void lj_vm_ceil_sse(void)    { assert(0 && "NYI"); }
 void lj_vm_trunc_sse(void)   { assert(0 && "NYI"); }
 void lj_vm_powi_sse(void)    { assert(0 && "NYI"); }
-double lj_vm_trunc(double d) { assert(0 && "NYI"); }
 
 LJ_ASMF TValue *lj_vm_next(GCtab *t, uint32_t idx) { assert(0 && "NYI"); }
